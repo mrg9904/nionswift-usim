@@ -25,7 +25,7 @@ from nion.usim_device import SampleSimulator
 from nion.utils import Geometry
 from nion.utils import Observable
 from nion.utils import ReferenceCounting
-
+from nion.usim_device import HAADFFocusModel
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -801,6 +801,9 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
     def __init__(self, *, sample_index: int = 0) -> None:
         super().__init__()
         self.stage_size_nm = 1000
+
+        # Define best focus
+        self.best_focus_m = 0.0
         # define the samples
         self.__samples = [SampleSimulator.RectangleFlakeSample(self.stage_size_nm), SampleSimulator.AmorphousSample(self.stage_size_nm), SampleSimulator.CombinedTestSample(self.stage_size_nm)]
         self.__sample_index = sample_index
@@ -835,9 +838,46 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
         data: numpy.typing.NDArray[numpy.float32] = numpy.zeros(tuple(used_size), numpy.float32)
         # Now get the data from the sample simulator
         value_manager = typing.cast(ValueManager, instrument.value_manager)
-        offset_m = value_manager.actual_offset_m  # stage position - beam shift + drift
-        self.sample.plot_features(data, offset_m, fov_size_nm, extra_nm, center_nm, used_size)
+        offset_m = value_manager.actual_offset_m
+
+        # Generate the ideal two-dimensional sample projection.
+        self.sample.plot_features(
+            data,
+            offset_m,
+            fov_size_nm,
+            extra_nm,
+            center_nm,
+            used_size
+        )
+
+        # Read the current defocus and convergence semi-angle.
+        # In uSim, C10 is expressed in meters and ConvergenceAngle in radians.
+        defocus_m = instrument.GetVal("C10Control")
+        convergence_angle_rad = instrument.GetVal("ConvergenceAngle")
+
+        # Calculate the pixel size, including the additional rotation margin,
+        # in units of nm per pixel.
+        pixel_size_y_nm = (
+            fov_size_nm.height + extra_nm.y
+        ) / used_size.height
+
+        pixel_size_x_nm = (
+            fov_size_nm.width + extra_nm.x
+        ) / used_size.width
+
+        # Apply defocus-dependent probe broadening to the ideal HAADF image.
+        data = HAADFFocusModel.apply_defocus(
+            data,
+            defocus_m=defocus_m,
+            best_focus_m=self.best_focus_m,
+            convergence_angle_rad=convergence_angle_rad,
+            pixel_size_y_nm=pixel_size_y_nm,
+            pixel_size_x_nm=pixel_size_x_nm,
+        )
+
+        # Add noise after applying the defocus-dependent imaging response.
         noise_factor = 0.3
+        
         if rotation != 0:
             inner_height = size.height / used_size.height
             inner_width = size.width / used_size.width
