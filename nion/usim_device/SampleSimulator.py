@@ -11,6 +11,7 @@ import typing
 
 from nion.data import Image
 from nion.utils import Geometry
+from nion.usim_device import SimulationSettings
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -613,7 +614,9 @@ class ThreeThicknessBlocksSample(Sample):
         extra_nm: Geometry.FloatPoint,
         center_nm: Geometry.FloatPoint,
         used_size: Geometry.IntSize,
-        slice_thickness_nm: float = 5.0,
+        slice_thickness_nm: float = (
+            SimulationSettings.DEPTH_SLICE_THICKNESS_NM
+        ),
     ) -> typing.List[typing.Tuple[float, _NDArray]]:
         """Divide the sample thickness into discrete axial slices.
 
@@ -832,7 +835,9 @@ class SphericalParticleFeature(Feature):
         fov_nm: Geometry.FloatSize,
         center_nm: Geometry.FloatPoint,
         shape: Geometry.IntSize,
-        slice_thickness_nm: float = 1.0,
+        slice_thickness_nm: float = (
+            SimulationSettings.DEPTH_SLICE_THICKNESS_NM
+        ),
     ) -> typing.List[typing.Tuple[float, _NDArray]]:
         """Divide the spherical particle into axial slices."""
 
@@ -969,7 +974,9 @@ class SphericalParticleSample(Sample):
         extra_nm: Geometry.FloatPoint,
         center_nm: Geometry.FloatPoint,
         used_size: Geometry.IntSize,
-        slice_thickness_nm: float = 1.0,
+        slice_thickness_nm: float = (
+            SimulationSettings.DEPTH_SLICE_THICKNESS_NM
+        ),
     ) -> typing.List[typing.Tuple[float, _NDArray]]:
         """Generate the depth-resolved spherical particle."""
 

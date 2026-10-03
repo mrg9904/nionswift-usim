@@ -7,7 +7,93 @@ import numpy
 import numpy.typing
 import scipy.ndimage
 
+from nion.usim_device import SimulationSettings
+
 _NDArray = numpy.typing.NDArray[numpy.float32]
+
+
+def _make_odd_filter_size(value: float) -> int:
+    """Convert a calculated box-filter width to a positive odd integer."""
+
+    filter_size = max(
+        1,
+        int(round(value)),
+    )
+
+    if filter_size % 2 == 0:
+        filter_size += 1
+
+    return filter_size
+
+
+def _apply_probe_blur(
+    data: _NDArray,
+    sigma_y_px: float,
+    sigma_x_px: float,
+) -> _NDArray:
+    """Apply either an exact Gaussian or a fast box-filter approximation."""
+
+    maximum_sigma_px = max(
+        sigma_y_px,
+        sigma_x_px,
+    )
+
+    use_fast_filter = (
+        SimulationSettings.USE_FAST_BOX_FILTER
+        and maximum_sigma_px
+        >= SimulationSettings.FAST_BOX_FILTER_THRESHOLD_PX
+    )
+
+    if not use_fast_filter:
+        filtered_data = scipy.ndimage.gaussian_filter(
+            data,
+            sigma=(sigma_y_px, sigma_x_px),
+            mode="reflect",
+            truncate=SimulationSettings.GAUSSIAN_TRUNCATE,
+        )
+
+        return filtered_data.astype(
+            numpy.float32,
+            copy=False,
+        )
+
+    number_of_passes = max(
+        1,
+        SimulationSettings.FAST_BOX_FILTER_PASSES,
+    )
+
+    # The variance of n repeated box filters is matched to the
+    # requested Gaussian variance.
+    box_height = _make_odd_filter_size(
+        math.sqrt(
+            12.0 * sigma_y_px**2 / number_of_passes
+            + 1.0
+        )
+    )
+
+    box_width = _make_odd_filter_size(
+        math.sqrt(
+            12.0 * sigma_x_px**2 / number_of_passes
+            + 1.0
+        )
+    )
+
+    filtered_data = data.astype(
+        numpy.float32,
+        copy=False,
+    )
+
+    for _ in range(number_of_passes):
+        filtered_data = scipy.ndimage.uniform_filter(
+            filtered_data,
+            size=(box_height, box_width),
+            mode="reflect",
+        )
+
+    return filtered_data.astype(
+        numpy.float32,
+        copy=False,
+    )
 
 
 def apply_defocus(
@@ -18,8 +104,8 @@ def apply_defocus(
     convergence_angle_rad: float,
     pixel_size_y_nm: float,
     pixel_size_x_nm: float,
-    minimum_sigma_px: float = 0.25,
-    maximum_sigma_px: float = 40.0,
+    minimum_sigma_px: typing.Optional[float] = None,
+    maximum_sigma_px: typing.Optional[float] = None,
 ) -> _NDArray:
     """Apply a fast defocus response to a simulated HAADF image.
 
@@ -30,7 +116,15 @@ def apply_defocus(
     This model is intended for autofocus/control development. It is not
     an atomic-resolution multislice image-formation calculation.
     """
+    if minimum_sigma_px is None:
+        minimum_sigma_px = (
+            SimulationSettings.MINIMUM_SIGMA_PX
+        )
 
+    if maximum_sigma_px is None:
+        maximum_sigma_px = (
+            SimulationSettings.MAXIMUM_SIGMA_PX
+        )
     focus_error_nm = (defocus_m - best_focus_m) * 1e9
 
     # alpha is dimensionless (rad), so the result remains in nm.
@@ -50,10 +144,10 @@ def apply_defocus(
     sigma_y_px = min(sigma_y_px, maximum_sigma_px)
     sigma_x_px = min(sigma_x_px, maximum_sigma_px)
 
-    focused_data = scipy.ndimage.gaussian_filter(
-        data,
-        sigma=(sigma_y_px, sigma_x_px),
-        mode="reflect",
+    focused_data = _apply_probe_blur(
+    data,
+    sigma_y_px,
+    sigma_x_px,
     )
 
     return focused_data.astype(numpy.float32, copy=False)
@@ -160,3 +254,50 @@ def apply_depth_planes_defocus(
         output += focused_plane
 
     return output
+
+def fast_gaussian_filter(
+    data: _NDArray,
+    sigma_y_px: float,
+    sigma_x_px: float,
+) -> _NDArray:
+    """Apply a fast Gaussian approximation using three box filters."""
+
+    if max(sigma_y_px, sigma_x_px) <= 3.0:
+        return scipy.ndimage.gaussian_filter(
+            data,
+            sigma=(sigma_y_px, sigma_x_px),
+            mode="reflect",
+            truncate=3.0,
+        )
+
+    box_height = max(
+        1,
+        int(round(math.sqrt(4.0 * sigma_y_px**2 + 1.0))),
+    )
+
+    box_width = max(
+        1,
+        int(round(math.sqrt(4.0 * sigma_x_px**2 + 1.0))),
+    )
+
+    # Use odd filter sizes.
+    if box_height % 2 == 0:
+        box_height += 1
+
+    if box_width % 2 == 0:
+        box_width += 1
+
+    filtered_data = data.astype(
+        numpy.float32,
+        copy=False,
+    )
+
+    # Three box filters approximate one Gaussian filter.
+    for _ in range(3):
+        filtered_data = scipy.ndimage.uniform_filter(
+            filtered_data,
+            size=(box_height, box_width),
+            mode="reflect",
+        )
+
+    return filtered_data

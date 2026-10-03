@@ -26,6 +26,7 @@ from nion.utils import Geometry
 from nion.utils import Observable
 from nion.utils import ReferenceCounting
 from nion.usim_device import HAADFFocusModel
+from nion.usim_device import SimulationSettings
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -893,13 +894,15 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
             ),
         ):
             depth_planes = self.sample.generate_depth_planes(
-                offset_m,
-                fov_size_nm,
-                extra_nm,
-                center_nm,
-                used_size,
-                slice_thickness_nm=1.0,
-            )
+            offset_m,
+            fov_size_nm,
+            extra_nm,
+            center_nm,
+            used_size,
+            slice_thickness_nm=(
+                SimulationSettings.DEPTH_SLICE_THICKNESS_NM
+            ),
+        )
 
             data = HAADFFocusModel.apply_depth_planes_defocus(
                 depth_planes,
