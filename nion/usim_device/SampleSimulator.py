@@ -484,3 +484,207 @@ class ThreeHeightBlocksSample(Sample):
                 center_nm,
                 used_size,
             )
+
+class ThicknessBlockFeature(FlakeFeature):
+    """A rectangular feature with a defined specimen thickness."""
+
+    def __init__(
+        self,
+        position_m: Geometry.FloatPoint,
+        size_m: Geometry.FloatSize,
+        thickness_nm: float,
+    ) -> None:
+        super().__init__(
+            position_m,
+            size_m,
+            [(68, 30), (855, 50), (872, 50)],
+            20.0,
+            4,
+        )
+
+        self.thickness_nm = thickness_nm
+
+    def create_mask(
+        self,
+        offset_m: Geometry.FloatPoint,
+        fov_nm: Geometry.FloatSize,
+        center_nm: Geometry.FloatPoint,
+        shape: Geometry.IntSize,
+    ) -> _NDArray:
+        """Create a binary mask using the existing FlakeFeature geometry."""
+
+        mask = numpy.zeros(
+            (shape.height, shape.width),
+            dtype=numpy.float32,
+        )
+
+        super().plot(
+            mask,
+            offset_m,
+            fov_nm,
+            center_nm,
+            shape,
+        )
+
+        return typing.cast(_NDArray, mask)
+
+class ThreeThicknessBlocksSample(Sample):
+    """Three blocks sharing one base plane but having different thicknesses."""
+
+    def __init__(self, stage_size_nm: float) -> None:
+        self.__features: typing.List[Feature] = list()
+
+        _ = stage_size_nm
+
+        # Keep the same projected size so that only thickness changes.
+        block_size_m = Geometry.FloatSize(
+            height=40e-9,
+            width=40e-9,
+        )
+
+        # Each tuple contains:
+        # (horizontal position in nm, thickness in nm)
+        block_definitions = (
+            (-60.0, 20.0),
+            (0.0, 50.0),
+            (60.0, 100.0),
+        )
+
+        for x_position_nm, thickness_nm in block_definitions:
+            position_m = Geometry.FloatPoint(
+                y=0.0,
+                x=x_position_nm * 1e-9,
+            )
+
+            self.__features.append(
+                ThicknessBlockFeature(
+                    position_m=position_m,
+                    size_m=block_size_m,
+                    thickness_nm=thickness_nm,
+                )
+            )
+
+    @property
+    def title(self) -> str:
+        return _("Three Thickness Blocks")
+
+    @property
+    def features(self) -> typing.List[Feature]:
+        return self.__features
+
+    def plot_features(
+        self,
+        data: _NDArray,
+        offset_m: Geometry.FloatPoint,
+        fov_size_nm: Geometry.FloatSize,
+        extra_nm: Geometry.FloatPoint,
+        center_nm: Geometry.FloatPoint,
+        used_size: Geometry.IntSize,
+    ) -> None:
+        """Generate a thickness-dependent ideal HAADF projection."""
+
+        reference_thickness_nm = 20.0
+
+        for feature in self.__features:
+            assert isinstance(
+                feature,
+                ThicknessBlockFeature,
+            )
+
+            mask = feature.create_mask(
+                offset_m,
+                fov_size_nm + extra_nm,
+                center_nm,
+                used_size,
+            )
+
+            # Thin-specimen approximation:
+            # HAADF intensity is proportional to specimen thickness.
+            data += (
+                mask
+                * feature.thickness_nm
+                / reference_thickness_nm
+            )
+
+    def generate_depth_planes(
+        self,
+        offset_m: Geometry.FloatPoint,
+        fov_size_nm: Geometry.FloatSize,
+        extra_nm: Geometry.FloatPoint,
+        center_nm: Geometry.FloatPoint,
+        used_size: Geometry.IntSize,
+        slice_thickness_nm: float = 5.0,
+    ) -> typing.List[typing.Tuple[float, _NDArray]]:
+        """Divide the sample thickness into discrete axial slices.
+
+        Returns a list of:
+            (depth_nm, HAADF contribution at that depth)
+        """
+
+        reference_thickness_nm = 20.0
+
+        depth_plane_dictionary: typing.Dict[
+            float,
+            _NDArray,
+        ] = dict()
+
+        for feature in self.__features:
+            assert isinstance(
+                feature,
+                ThicknessBlockFeature,
+            )
+
+            mask = feature.create_mask(
+                offset_m,
+                fov_size_nm + extra_nm,
+                center_nm,
+                used_size,
+            )
+
+            lower_depth_nm = 0.0
+
+            while lower_depth_nm < feature.thickness_nm:
+                current_slice_nm = min(
+                    slice_thickness_nm,
+                    feature.thickness_nm - lower_depth_nm,
+                )
+
+                center_depth_nm = (
+                    lower_depth_nm
+                    + current_slice_nm * 0.5
+                )
+
+                # Rounded key avoids tiny floating-point differences.
+                depth_key_nm = round(center_depth_nm, 9)
+
+                if depth_key_nm not in depth_plane_dictionary:
+                    depth_plane_dictionary[depth_key_nm] = (
+                        numpy.zeros(
+                            (
+                                used_size.height,
+                                used_size.width,
+                            ),
+                            dtype=numpy.float32,
+                        )
+                    )
+
+                # Each slice contributes according to its own thickness.
+                depth_plane_dictionary[depth_key_nm] += (
+                    mask
+                    * current_slice_nm
+                    / reference_thickness_nm
+                )
+
+                lower_depth_nm += current_slice_nm
+
+        depth_planes = [
+            (
+                depth_nm,
+                depth_plane_dictionary[depth_nm],
+            )
+            for depth_nm in sorted(
+                depth_plane_dictionary.keys()
+            )
+        ]
+
+        return depth_planes

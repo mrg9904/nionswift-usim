@@ -818,6 +818,9 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
             SampleSimulator.ThreeHeightBlocksSample(
                 self.stage_size_nm
             ),
+            SampleSimulator.ThreeThicknessBlocksSample(
+                self.stage_size_nm
+            ),
         ]
         self.__sample_index = sample_index
 
@@ -881,6 +884,31 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
         # Apply height-dependent focus only to the new test sample.
         if isinstance(
             self.sample,
+            SampleSimulator.ThreeThicknessBlocksSample,
+        ):
+            depth_planes = self.sample.generate_depth_planes(
+                offset_m,
+                fov_size_nm,
+                extra_nm,
+                center_nm,
+                used_size,
+
+                # Thickness of a single HAADF integration layer
+                slice_thickness_nm=5.0,
+            )
+
+            data = HAADFFocusModel.apply_depth_planes_defocus(
+                depth_planes,
+                defocus_m=defocus_m,
+                best_focus_m=self.best_focus_m,
+                convergence_angle_rad=convergence_angle_rad,
+                pixel_size_y_nm=pixel_size_y_nm,
+                pixel_size_x_nm=pixel_size_x_nm,
+            )
+
+        # The height sample assigns one discrete height to each projected position.
+        elif isinstance(
+            self.sample,
             SampleSimulator.ThreeHeightBlocksSample,
         ):
             height_map_nm = numpy.zeros_like(
@@ -909,8 +937,8 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
                 )
             )
 
+        # All original samples retain the existing uniform-focus behavior.
         else:
-            # Preserve the original uniform-focus behavior for all existing samples.
             data = HAADFFocusModel.apply_defocus(
                 data,
                 defocus_m=defocus_m,

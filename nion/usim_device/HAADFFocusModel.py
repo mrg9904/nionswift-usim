@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import math
+import typing
 
 import numpy
 import numpy.typing
 import scipy.ndimage
-
 
 _NDArray = numpy.typing.NDArray[numpy.float32]
 
@@ -101,6 +101,51 @@ def apply_height_dependent_defocus(
         plane_best_focus_m = (
             best_focus_m
             + float(height_nm) * 1e-9
+        )
+
+        focused_plane = apply_defocus(
+            plane_data,
+            defocus_m=defocus_m,
+            best_focus_m=plane_best_focus_m,
+            convergence_angle_rad=convergence_angle_rad,
+            pixel_size_y_nm=pixel_size_y_nm,
+            pixel_size_x_nm=pixel_size_x_nm,
+        )
+
+        output += focused_plane
+
+    return output
+
+def apply_depth_planes_defocus(
+    depth_planes: typing.Sequence[
+        typing.Tuple[float, _NDArray]
+    ],
+    *,
+    defocus_m: float,
+    best_focus_m: float,
+    convergence_angle_rad: float,
+    pixel_size_y_nm: float,
+    pixel_size_x_nm: float,
+) -> _NDArray:
+    """Focus and sum HAADF contributions from multiple sample depths."""
+
+    if not depth_planes:
+        raise ValueError(
+            "depth_planes must contain at least one depth plane"
+        )
+
+    first_plane = depth_planes[0][1]
+
+    output = numpy.zeros_like(
+        first_plane,
+        dtype=numpy.float32,
+    )
+
+    for depth_nm, plane_data in depth_planes:
+        # The reference focus corresponds to the common base plane z = 0.
+        plane_best_focus_m = (
+            best_focus_m
+            + depth_nm * 1e-9
         )
 
         focused_plane = apply_defocus(
