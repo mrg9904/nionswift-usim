@@ -4,18 +4,71 @@
 # Depth slicing
 # ----------------------------------------------------------------------
 
-# Thickness of each axial sample slice.
+# Calculate the depth-slice thickness from the current scan FOV:
 #
-# Smaller values:
-#     More accurate depth integration, but more image filters per frame.
+#     slice thickness = FOV / DEPTH_SLICE_FOV_DIVISOR
 #
-# For a 100 nm particle:
-#     1.0 nm -> 100 depth planes
-#     2.0 nm -> 50 depth planes
-#     5.0 nm -> 20 depth planes
-DEPTH_SLICE_THICKNESS_NM = 5.0
+# Examples:
+#     FOV = 50 nm  -> slice = 0.5 nm
+#     FOV = 100 nm -> slice = 1.0 nm
+#     FOV = 200 nm -> slice = 2.0 nm
+# Calculate the requested slice thickness as:
+DEPTH_SLICE_FOV_DIVISOR = 100.0
+
+# Prevent excessively small slices from creating too many depth planes.
+MINIMUM_DEPTH_SLICE_THICKNESS_NM = 0.5
+
+# Prevent excessively large slices from producing a coarse depth model.
+MAXIMUM_DEPTH_SLICE_THICKNESS_NM = 10.0
 
 
+def calculate_depth_slice_thickness_nm(
+    fov_height_nm: float,
+    fov_width_nm: float,
+) -> float:
+    """Calculate and constrain slice thickness from the current FOV."""
+
+    if DEPTH_SLICE_FOV_DIVISOR <= 0.0:
+        raise ValueError(
+            "DEPTH_SLICE_FOV_DIVISOR must be greater than zero"
+        )
+
+    if fov_height_nm <= 0.0 or fov_width_nm <= 0.0:
+        raise ValueError(
+            "The scan FOV dimensions must be greater than zero"
+        )
+
+    if MINIMUM_DEPTH_SLICE_THICKNESS_NM <= 0.0:
+        raise ValueError(
+            "MINIMUM_DEPTH_SLICE_THICKNESS_NM must be greater than zero"
+        )
+
+    if (
+        MAXIMUM_DEPTH_SLICE_THICKNESS_NM
+        < MINIMUM_DEPTH_SLICE_THICKNESS_NM
+    ):
+        raise ValueError(
+            "MAXIMUM_DEPTH_SLICE_THICKNESS_NM must be greater "
+            "than or equal to MINIMUM_DEPTH_SLICE_THICKNESS_NM"
+        )
+
+    effective_fov_nm = min(
+        fov_height_nm,
+        fov_width_nm,
+    )
+
+    requested_slice_thickness_nm = (
+        effective_fov_nm
+        / DEPTH_SLICE_FOV_DIVISOR
+    )
+
+    return min(
+        max(
+            requested_slice_thickness_nm,
+            MINIMUM_DEPTH_SLICE_THICKNESS_NM,
+        ),
+        MAXIMUM_DEPTH_SLICE_THICKNESS_NM,
+    )
 # ----------------------------------------------------------------------
 # Defocus blur
 # ----------------------------------------------------------------------

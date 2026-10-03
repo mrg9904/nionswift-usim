@@ -893,16 +893,32 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
                 SampleSimulator.SphericalParticleSample,
             ),
         ):
+            # Use the shorter FOV dimension for non-square scan regions.
+            effective_fov_nm = min(
+                fov_size_nm.height,
+                fov_size_nm.width,
+            )
+
+            requested_slice_thickness_nm = (
+                effective_fov_nm
+                / SimulationSettings.DEPTH_SLICE_FOV_DIVISOR
+            )
+
+            depth_slice_thickness_nm = (
+                SimulationSettings.calculate_depth_slice_thickness_nm(
+                    fov_height_nm=fov_size_nm.height,
+                    fov_width_nm=fov_size_nm.width,
+                )
+            )
+
             depth_planes = self.sample.generate_depth_planes(
-            offset_m,
-            fov_size_nm,
-            extra_nm,
-            center_nm,
-            used_size,
-            slice_thickness_nm=(
-                SimulationSettings.DEPTH_SLICE_THICKNESS_NM
-            ),
-        )
+                offset_m,
+                fov_size_nm,
+                extra_nm,
+                center_nm,
+                used_size,
+                slice_thickness_nm=depth_slice_thickness_nm,
+            )
 
             data = HAADFFocusModel.apply_depth_planes_defocus(
                 depth_planes,
