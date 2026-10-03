@@ -57,3 +57,61 @@ def apply_defocus(
     )
 
     return focused_data.astype(numpy.float32, copy=False)
+
+def apply_height_dependent_defocus(
+    data: _NDArray,
+    height_map_nm: _NDArray,
+    *,
+    defocus_m: float,
+    best_focus_m: float,
+    convergence_angle_rad: float,
+    pixel_size_y_nm: float,
+    pixel_size_x_nm: float,
+) -> _NDArray:
+    """Apply a separate defocus response to each sample height."""
+
+    if data.shape != height_map_nm.shape:
+        raise ValueError(
+            "data and height_map_nm must have the same shape"
+        )
+
+    output = numpy.zeros_like(
+        data,
+        dtype=numpy.float32,
+    )
+
+    # For this test sample, the result is [0, 50, 100].
+    height_planes_nm = numpy.unique(height_map_nm)
+
+    for height_nm in height_planes_nm:
+        plane_mask = height_map_nm == height_nm
+
+        # Retain only the image intensity belonging to this height.
+        plane_data = numpy.where(
+            plane_mask,
+            data,
+            0.0,
+        ).astype(
+            numpy.float32,
+            copy=False,
+        )
+
+        # A feature at a higher axial position has a correspondingly
+        # shifted best-focus value.
+        plane_best_focus_m = (
+            best_focus_m
+            + float(height_nm) * 1e-9
+        )
+
+        focused_plane = apply_defocus(
+            plane_data,
+            defocus_m=defocus_m,
+            best_focus_m=plane_best_focus_m,
+            convergence_angle_rad=convergence_angle_rad,
+            pixel_size_y_nm=pixel_size_y_nm,
+            pixel_size_x_nm=pixel_size_x_nm,
+        )
+
+        output += focused_plane
+
+    return output

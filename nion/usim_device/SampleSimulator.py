@@ -343,3 +343,144 @@ class CombinedTestSample(Sample):
             self.__last_plot = data.copy()
         else:
             data[:] = self.__last_plot
+
+class HeightBlockFeature(FlakeFeature):
+    """A rectangular sample feature with a defined axial height."""
+
+    def __init__(
+        self,
+        position_m: Geometry.FloatPoint,
+        size_m: Geometry.FloatSize,
+        height_nm: float,
+    ) -> None:
+        super().__init__(
+            position_m,
+            size_m,
+            [(68, 30), (855, 50), (872, 50)],
+            20.0,
+            4,
+        )
+
+        self.height_nm = height_nm
+
+    def plot_height(
+        self,
+        height_map_nm: _NDArray,
+        offset_m: Geometry.FloatPoint,
+        fov_nm: Geometry.FloatSize,
+        center_nm: Geometry.FloatPoint,
+        shape: Geometry.IntSize,
+    ) -> None:
+        """Draw this feature into the sample height map."""
+
+        block_mask = numpy.zeros_like(
+            height_map_nm,
+            dtype=numpy.float32,
+        )
+
+        # Use the existing FlakeFeature plotting method so that the
+        # HAADF projection and height map use identical coordinates.
+        self.plot(
+            block_mask,
+            offset_m,
+            fov_nm,
+            center_nm,
+            shape,
+        )
+
+        inside_block = block_mask > 0
+
+        # If two blocks overlap, retain the uppermost surface.
+        height_map_nm[inside_block] = numpy.maximum(
+            height_map_nm[inside_block],
+            self.height_nm,
+        )
+
+class ThreeHeightBlocksSample(Sample):
+    """A sample containing three blocks at different axial heights."""
+
+    def __init__(self, stage_size_nm: float) -> None:
+        self.__features: typing.List[Feature] = list()
+
+        # Retain the standard Sample constructor interface.
+        _ = stage_size_nm
+
+        # All three blocks are 40 nm by 40 nm.
+        block_size_m = Geometry.FloatSize(
+            height=40e-9,
+            width=40e-9,
+        )
+
+        # Each tuple contains:
+        # (horizontal position in nm, height in nm)
+        block_definitions = (
+            (-60.0, 0.0),
+            (0.0, 50.0),
+            (60.0, 100.0),
+        )
+
+        for x_position_nm, height_nm in block_definitions:
+            position_m = Geometry.FloatPoint(
+                y=0.0,
+                x=x_position_nm * 1e-9,
+            )
+
+            self.__features.append(
+                HeightBlockFeature(
+                    position_m=position_m,
+                    size_m=block_size_m,
+                    height_nm=height_nm,
+                )
+            )
+
+    @property
+    def title(self) -> str:
+        return _("Three Height Blocks")
+
+    @property
+    def features(self) -> typing.List[Feature]:
+        return self.__features
+
+    def plot_features(
+        self,
+        data: _NDArray,
+        offset_m: Geometry.FloatPoint,
+        fov_size_nm: Geometry.FloatSize,
+        extra_nm: Geometry.FloatPoint,
+        center_nm: Geometry.FloatPoint,
+        used_size: Geometry.IntSize,
+    ) -> None:
+        """Generate the ideal two-dimensional HAADF projection."""
+
+        for feature in self.__features:
+            feature.plot(
+                data,
+                offset_m,
+                fov_size_nm + extra_nm,
+                center_nm,
+                used_size,
+            )
+
+    def plot_height_map(
+        self,
+        height_map_nm: _NDArray,
+        offset_m: Geometry.FloatPoint,
+        fov_size_nm: Geometry.FloatSize,
+        extra_nm: Geometry.FloatPoint,
+        center_nm: Geometry.FloatPoint,
+        used_size: Geometry.IntSize,
+    ) -> None:
+        """Generate the height map for the three blocks."""
+
+        height_map_nm.fill(0.0)
+
+        for feature in self.__features:
+            assert isinstance(feature, HeightBlockFeature)
+
+            feature.plot_height(
+                height_map_nm,
+                offset_m,
+                fov_size_nm + extra_nm,
+                center_nm,
+                used_size,
+            )

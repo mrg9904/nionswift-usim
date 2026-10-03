@@ -805,7 +805,20 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
         # Define best focus
         self.best_focus_m = 0.0
         # define the samples
-        self.__samples = [SampleSimulator.RectangleFlakeSample(self.stage_size_nm), SampleSimulator.AmorphousSample(self.stage_size_nm), SampleSimulator.CombinedTestSample(self.stage_size_nm)]
+        self.__samples = [
+            SampleSimulator.RectangleFlakeSample(
+                self.stage_size_nm
+            ),
+            SampleSimulator.AmorphousSample(
+                self.stage_size_nm
+            ),
+            SampleSimulator.CombinedTestSample(
+                self.stage_size_nm
+            ),
+            SampleSimulator.ThreeHeightBlocksSample(
+                self.stage_size_nm
+            ),
+        ]
         self.__sample_index = sample_index
 
     @property
@@ -865,15 +878,47 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
             fov_size_nm.width + extra_nm.x
         ) / used_size.width
 
-        # Apply defocus-dependent probe broadening to the ideal HAADF image.
-        data = HAADFFocusModel.apply_defocus(
-            data,
-            defocus_m=defocus_m,
-            best_focus_m=self.best_focus_m,
-            convergence_angle_rad=convergence_angle_rad,
-            pixel_size_y_nm=pixel_size_y_nm,
-            pixel_size_x_nm=pixel_size_x_nm,
-        )
+        # Apply height-dependent focus only to the new test sample.
+        if isinstance(
+            self.sample,
+            SampleSimulator.ThreeHeightBlocksSample,
+        ):
+            height_map_nm = numpy.zeros_like(
+                data,
+                dtype=numpy.float32,
+            )
+
+            self.sample.plot_height_map(
+                height_map_nm,
+                offset_m,
+                fov_size_nm,
+                extra_nm,
+                center_nm,
+                used_size,
+            )
+
+            data = (
+                HAADFFocusModel.apply_height_dependent_defocus(
+                    data,
+                    height_map_nm=height_map_nm,
+                    defocus_m=defocus_m,
+                    best_focus_m=self.best_focus_m,
+                    convergence_angle_rad=convergence_angle_rad,
+                    pixel_size_y_nm=pixel_size_y_nm,
+                    pixel_size_x_nm=pixel_size_x_nm,
+                )
+            )
+
+        else:
+            # Preserve the original uniform-focus behavior for all existing samples.
+            data = HAADFFocusModel.apply_defocus(
+                data,
+                defocus_m=defocus_m,
+                best_focus_m=self.best_focus_m,
+                convergence_angle_rad=convergence_angle_rad,
+                pixel_size_y_nm=pixel_size_y_nm,
+                pixel_size_x_nm=pixel_size_x_nm,
+            )
 
         # Add noise after applying the defocus-dependent imaging response.
         noise_factor = 0.3
