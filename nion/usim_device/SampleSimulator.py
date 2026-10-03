@@ -688,3 +688,302 @@ class ThreeThicknessBlocksSample(Sample):
         ]
 
         return depth_planes
+
+class SphericalParticleFeature(Feature):
+    """A spherical particle resting on the reference sample plane."""
+
+    def __init__(
+        self,
+        position_m: Geometry.FloatPoint,
+        radius_nm: float,
+        base_height_nm: float = 0.0,
+    ) -> None:
+        diameter_m = 2.0 * radius_nm * 1e-9
+
+        super().__init__(
+            position_m=position_m,
+            size_m=Geometry.FloatSize(
+                height=diameter_m,
+                width=diameter_m,
+            ),
+            edges=[
+                (68, 30),
+                (855, 50),
+                (872, 50),
+            ],
+            plasmon_eV=20.0,
+            plurality=4,
+        )
+
+        self.radius_nm = radius_nm
+        self.base_height_nm = base_height_nm
+
+        # A thickness of 20 nm corresponds to an HAADF intensity of 1.
+        self.reference_thickness_nm = 20.0
+
+    def _radial_distance_squared_nm(
+        self,
+        offset_m: Geometry.FloatPoint,
+        fov_nm: Geometry.FloatSize,
+        center_nm: Geometry.FloatPoint,
+        shape: Geometry.IntSize,
+    ) -> _NDArray:
+        """Calculate the squared radial distance from the sphere center."""
+
+        scan_rect_m = self.get_scan_rect_m(
+            offset_m,
+            fov_nm,
+            center_nm,
+        )
+
+        y_coordinates_m = (
+            scan_rect_m.top
+            + (
+                numpy.arange(
+                    shape.height,
+                    dtype=numpy.float64,
+                )
+                + 0.5
+            )
+            * scan_rect_m.height
+            / shape.height
+        )
+
+        x_coordinates_m = (
+            scan_rect_m.left
+            + (
+                numpy.arange(
+                    shape.width,
+                    dtype=numpy.float64,
+                )
+                + 0.5
+            )
+            * scan_rect_m.width
+            / shape.width
+        )
+
+        y_distance_nm = (
+            y_coordinates_m - self.position_m.y
+        ) * 1e9
+
+        x_distance_nm = (
+            x_coordinates_m - self.position_m.x
+        ) * 1e9
+
+        radial_distance_squared_nm = (
+            y_distance_nm[:, numpy.newaxis] ** 2
+            + x_distance_nm[numpy.newaxis, :] ** 2
+        )
+
+        return typing.cast(
+            _NDArray,
+            radial_distance_squared_nm,
+        )
+
+    def plot(
+        self,
+        data: _NDArray,
+        offset_m: Geometry.FloatPoint,
+        fov_nm: Geometry.FloatSize,
+        center_nm: Geometry.FloatPoint,
+        shape: Geometry.IntSize,
+    ) -> int:
+        """Generate the ideal projected HAADF intensity of the sphere."""
+
+        radial_distance_squared_nm = (
+            self._radial_distance_squared_nm(
+                offset_m,
+                fov_nm,
+                center_nm,
+                shape,
+            )
+        )
+
+        inside_sphere = (
+            radial_distance_squared_nm
+            <= self.radius_nm**2
+        )
+
+        thickness_map_nm = numpy.zeros(
+            (shape.height, shape.width),
+            dtype=numpy.float32,
+        )
+
+        thickness_map_nm[inside_sphere] = (
+            2.0
+            * numpy.sqrt(
+                self.radius_nm**2
+                - radial_distance_squared_nm[inside_sphere]
+            )
+        )
+
+        # Thin-specimen approximation: HAADF intensity is proportional
+        # to the projected specimen thickness.
+        data += (
+            thickness_map_nm
+            / self.reference_thickness_nm
+        )
+
+        return int(numpy.count_nonzero(inside_sphere))
+
+    def generate_depth_planes(
+        self,
+        offset_m: Geometry.FloatPoint,
+        fov_nm: Geometry.FloatSize,
+        center_nm: Geometry.FloatPoint,
+        shape: Geometry.IntSize,
+        slice_thickness_nm: float = 1.0,
+    ) -> typing.List[typing.Tuple[float, _NDArray]]:
+        """Divide the spherical particle into axial slices."""
+
+        if slice_thickness_nm <= 0.0:
+            raise ValueError(
+                "slice_thickness_nm must be greater than zero"
+            )
+
+        radial_distance_squared_nm = (
+            self._radial_distance_squared_nm(
+                offset_m,
+                fov_nm,
+                center_nm,
+                shape,
+            )
+        )
+
+        depth_planes: typing.List[
+            typing.Tuple[float, _NDArray]
+        ] = list()
+
+        sphere_diameter_nm = 2.0 * self.radius_nm
+        lower_local_depth_nm = 0.0
+
+        while lower_local_depth_nm < sphere_diameter_nm:
+            current_slice_nm = min(
+                slice_thickness_nm,
+                sphere_diameter_nm - lower_local_depth_nm,
+            )
+
+            center_local_depth_nm = (
+                lower_local_depth_nm
+                + current_slice_nm * 0.5
+            )
+
+            # The sphere center is located one radius above its base.
+            distance_from_sphere_center_nm = (
+                center_local_depth_nm
+                - self.radius_nm
+            )
+
+            cross_section_radius_squared_nm = (
+                self.radius_nm**2
+                - distance_from_sphere_center_nm**2
+            )
+
+            # Numerical roundoff could produce a very small negative value.
+            cross_section_radius_squared_nm = max(
+                cross_section_radius_squared_nm,
+                0.0,
+            )
+
+            inside_cross_section = (
+                radial_distance_squared_nm
+                <= cross_section_radius_squared_nm
+            )
+
+            plane_data = numpy.zeros(
+                (shape.height, shape.width),
+                dtype=numpy.float32,
+            )
+
+            plane_data[inside_cross_section] = (
+                current_slice_nm
+                / self.reference_thickness_nm
+            )
+
+            absolute_depth_nm = (
+                self.base_height_nm
+                + center_local_depth_nm
+            )
+
+            depth_planes.append(
+                (
+                    absolute_depth_nm,
+                    plane_data,
+                )
+            )
+
+            lower_local_depth_nm += current_slice_nm
+
+        return depth_planes
+
+
+class SphericalParticleSample(Sample):
+    """A single spherical particle with a spherical thickness profile."""
+
+    def __init__(self, stage_size_nm: float) -> None:
+        _ = stage_size_nm
+
+        self.__features: typing.List[Feature] = [
+            SphericalParticleFeature(
+                position_m=Geometry.FloatPoint(
+                    y=0.0,
+                    x=0.0,
+                ),
+                radius_nm=50.0,
+                base_height_nm=0.0,
+            )
+        ]
+
+    @property
+    def title(self) -> str:
+        return _("Spherical Particle")
+
+    @property
+    def features(self) -> typing.List[Feature]:
+        return self.__features
+
+    def plot_features(
+        self,
+        data: _NDArray,
+        offset_m: Geometry.FloatPoint,
+        fov_size_nm: Geometry.FloatSize,
+        extra_nm: Geometry.FloatPoint,
+        center_nm: Geometry.FloatPoint,
+        used_size: Geometry.IntSize,
+    ) -> None:
+        """Generate the ideal projected HAADF image."""
+
+        for feature in self.__features:
+            feature.plot(
+                data,
+                offset_m,
+                fov_size_nm + extra_nm,
+                center_nm,
+                used_size,
+            )
+
+    def generate_depth_planes(
+        self,
+        offset_m: Geometry.FloatPoint,
+        fov_size_nm: Geometry.FloatSize,
+        extra_nm: Geometry.FloatPoint,
+        center_nm: Geometry.FloatPoint,
+        used_size: Geometry.IntSize,
+        slice_thickness_nm: float = 1.0,
+    ) -> typing.List[typing.Tuple[float, _NDArray]]:
+        """Generate the depth-resolved spherical particle."""
+
+        feature = self.__features[0]
+
+        assert isinstance(
+            feature,
+            SphericalParticleFeature,
+        )
+
+        return feature.generate_depth_planes(
+            offset_m,
+            fov_size_nm + extra_nm,
+            center_nm,
+            used_size,
+            slice_thickness_nm=slice_thickness_nm,
+        )
