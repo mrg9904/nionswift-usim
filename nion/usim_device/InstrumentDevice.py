@@ -25,8 +25,10 @@ from nion.usim_device import SampleSimulator
 from nion.utils import Geometry
 from nion.utils import Observable
 from nion.utils import ReferenceCounting
+from nion.usim_device import SampleSimulator
 from nion.usim_device import HAADFFocusModel
 from nion.usim_device import SimulationSettings
+from nion.usim_device import STLDepthSample
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -825,6 +827,9 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
             SampleSimulator.SphericalParticleSample(
                 self.stage_size_nm
             ),
+            STLDepthSample.STLDepthSample(
+                self.stage_size_nm
+            ),
         ]
         self.__sample_index = sample_index
 
@@ -860,16 +865,29 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
         value_manager = typing.cast(ValueManager, instrument.value_manager)
         offset_m = value_manager.actual_offset_m
 
-        # Generate the ideal two-dimensional sample projection.
-        self.sample.plot_features(
-            data,
-            offset_m,
-            fov_size_nm,
-            extra_nm,
-            center_nm,
-            used_size
+        depth_resolved_sample_types = (
+            SampleSimulator.ThreeThicknessBlocksSample,
+            SampleSimulator.SphericalParticleSample,
+            STLDepthSample.STLDepthSample,
         )
 
+        is_depth_resolved_sample = isinstance(
+            self.sample,
+            depth_resolved_sample_types,
+        )
+
+        # Depth-resolved samples will be generated later by
+        # generate_depth_planes(). Do not first calculate a redundant
+        # two-dimensional projection.
+        if not is_depth_resolved_sample:
+            self.sample.plot_features(
+                data,
+                offset_m,
+                fov_size_nm,
+                extra_nm,
+                center_nm,
+                used_size,
+            )
         # Read the current defocus and convergence semi-angle.
         # In uSim, C10 is expressed in meters and ConvergenceAngle in radians.
         defocus_m = instrument.GetVal("C10Control")
@@ -886,23 +904,7 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
         ) / used_size.width
 
         # Apply height-dependent focus only to the new test sample.
-        if isinstance(
-            self.sample,
-            (
-                SampleSimulator.ThreeThicknessBlocksSample,
-                SampleSimulator.SphericalParticleSample,
-            ),
-        ):
-            # Use the shorter FOV dimension for non-square scan regions.
-            effective_fov_nm = min(
-                fov_size_nm.height,
-                fov_size_nm.width,
-            )
-
-            requested_slice_thickness_nm = (
-                effective_fov_nm
-                / SimulationSettings.DEPTH_SLICE_FOV_DIVISOR
-            )
+        if is_depth_resolved_sample:
 
             depth_slice_thickness_nm = (
                 SimulationSettings.calculate_depth_slice_thickness_nm(
@@ -970,7 +972,7 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
             )
 
         # Add noise after applying the defocus-dependent imaging response.
-        noise_factor = 0.3
+        noise_factor = SimulationSettings.HAADF_NOISE_FACTOR
         
         if rotation != 0:
             inner_height = size.height / used_size.height

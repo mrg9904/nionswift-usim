@@ -13,10 +13,10 @@
 #     FOV = 100 nm -> slice = 1.0 nm
 #     FOV = 200 nm -> slice = 2.0 nm
 # Calculate the requested slice thickness as:
-DEPTH_SLICE_FOV_DIVISOR = 100.0
+DEPTH_SLICE_FOV_DIVISOR = 500.0
 
 # Prevent excessively small slices from creating too many depth planes.
-MINIMUM_DEPTH_SLICE_THICKNESS_NM = 0.5
+MINIMUM_DEPTH_SLICE_THICKNESS_NM = 0.1
 
 # Prevent excessively large slices from producing a coarse depth model.
 MAXIMUM_DEPTH_SLICE_THICKNESS_NM = 10.0
@@ -69,6 +69,41 @@ def calculate_depth_slice_thickness_nm(
         ),
         MAXIMUM_DEPTH_SLICE_THICKNESS_NM,
     )
+
+# ----------------------------------------------------------------------
+# STL depth-resolved sample
+# ----------------------------------------------------------------------
+
+# STL coordinates are interpreted directly as nanometers.
+STL_SAMPLE_FILE_NAME = "ten_random_cuboids_5nm.stl"
+
+# Translate the first cuboid to the scan origin.
+# Set both values to 0.0 to retain the original STL coordinates.
+STL_SAMPLE_SHIFT_X_NM = -1405.8069605737685
+STL_SAMPLE_SHIFT_Y_NM = 40.71017630395872
+
+# Match the intensity definition used by the existing thickness samples:
+# 20 nm material thickness produces an ideal HAADF intensity of 1.0.
+STL_REFERENCE_THICKNESS_NM = 20.0
+
+# Maximum number of rays processed by trimesh in one batch.
+STL_RAY_CHUNK_SIZE = 32768
+
+# ----------------------------------------------------------------------
+# STL intensity diagnostics
+# ----------------------------------------------------------------------
+
+# If True, normalize the summed depth-plane intensity at every occupied
+# XY pixel. This removes projected-thickness contrast while preserving
+# the relative distribution of intensity along Z.
+#
+# Use True only for debugging STL geometry and depth slicing.
+STL_NORMALIZE_COLUMN_INTENSITY = True
+
+# Total ideal intensity assigned to every occupied XY pixel after
+# column normalization.
+STL_NORMALIZED_COLUMN_INTENSITY = 1.0
+
 # ----------------------------------------------------------------------
 # Defocus blur
 # ----------------------------------------------------------------------
@@ -104,3 +139,17 @@ FAST_BOX_FILTER_THRESHOLD_PX = 3.0
 
 # Three box-filter passes provide a reasonable Gaussian approximation.
 FAST_BOX_FILTER_PASSES = 3
+
+# ----------------------------------------------------------------------
+# HAADF noise
+# ----------------------------------------------------------------------
+
+# Standard deviation of the additive Gaussian noise applied to the
+# simulated HAADF image before multiplication by pixel_time_us.
+#
+# Suggested values:
+#     0.0  -> no noise, useful for geometry debugging
+#     0.01 -> very low noise
+#     0.05 -> moderate noise
+#     0.3  -> original uSim noise level
+HAADF_NOISE_FACTOR = 0.0
