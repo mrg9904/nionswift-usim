@@ -143,58 +143,90 @@ class STLDepthSample(SampleSimulator.Sample):
             used_size.as_tuple(),
         )
 
-    def __first_hit_z(
+    def __surface_hits_from_above(
         self,
         ray_origins: numpy.typing.NDArray[numpy.float64],
-        direction_z: float,
-    ) -> numpy.typing.NDArray[numpy.float64]:
-        """Return the first intersection Z coordinate for every ray.
+    ) -> typing.Tuple[
+        numpy.typing.NDArray[numpy.float64],
+        numpy.typing.NDArray[numpy.float64],
+    ]:
+        """Return lower and upper surface Z values using one ray pass."""
 
-        Rays that do not intersect the mesh retain a NaN value.
-        """
+        ray_count = ray_origins.shape[0]
 
-        hit_z_nm = numpy.full(
-            ray_origins.shape[0],
-            numpy.nan,
+        lower_surface_nm = numpy.full(
+            ray_count,
+            numpy.inf,
+            dtype=numpy.float64,
+        )
+
+        upper_surface_nm = numpy.full(
+            ray_count,
+            -numpy.inf,
             dtype=numpy.float64,
         )
 
         chunk_size = max(
             1,
-            int(
-                SimulationSettings.STL_RAY_CHUNK_SIZE
-            ),
+            int(SimulationSettings.STL_RAY_CHUNK_SIZE),
         )
 
         for start in range(
             0,
-            ray_origins.shape[0],
+            ray_count,
             chunk_size,
         ):
             stop = min(
                 start + chunk_size,
-                ray_origins.shape[0],
+                ray_count,
             )
 
             origins = ray_origins[start:stop]
 
             directions = numpy.zeros_like(origins)
-            directions[:, 2] = direction_z
+            directions[:, 2] = -1.0
 
             locations, ray_indices, _ = (
                 self.__intersector.intersects_location(
                     ray_origins=origins,
                     ray_directions=directions,
-                    multiple_hits=False,
+                    multiple_hits=True,
                 )
             )
 
-            if ray_indices.size:
-                hit_z_nm[
-                    start + ray_indices
-                ] = locations[:, 2]
+            if not ray_indices.size:
+                continue
 
-        return hit_z_nm
+            global_ray_indices = (
+                start + ray_indices
+            )
+
+            hit_z_nm = locations[:, 2]
+
+            numpy.minimum.at(
+                lower_surface_nm,
+                global_ray_indices,
+                hit_z_nm,
+            )
+
+            numpy.maximum.at(
+                upper_surface_nm,
+                global_ray_indices,
+                hit_z_nm,
+            )
+
+        no_intersection = (
+            ~numpy.isfinite(lower_surface_nm)
+            | ~numpy.isfinite(upper_surface_nm)
+        )
+
+        lower_surface_nm[no_intersection] = numpy.nan
+        upper_surface_nm[no_intersection] = numpy.nan
+
+        return (
+            lower_surface_nm,
+            upper_surface_nm,
+        )
 
     def __calculate_surface_maps(
         self,
@@ -290,39 +322,32 @@ class STLDepthSample(SampleSimulator.Sample):
         )
 
         # Generate one downward ray from above the entire STL model.
-        upper_origins = numpy.empty(
+        ray_origins = numpy.empty(
             (ray_count, 3),
             dtype=numpy.float64,
         )
 
-        upper_origins[:, 0] = xx_nm.ravel()
-        upper_origins[:, 1] = yy_nm.ravel()
+        ray_origins[:, 0] = xx_nm.ravel()
+        ray_origins[:, 1] = yy_nm.ravel()
 
-        upper_origins[:, 2] = (
+        ray_origins[:, 2] = (
             self.__mesh.bounds[1, 2]
             + 1.0
         )
 
-        # Generate one upward ray from below the entire STL model.
-        lower_origins = upper_origins.copy()
-
-        lower_origins[:, 2] = (
-            self.__mesh.bounds[0, 2]
-            - 1.0
+        (
+            lower_surface_flat_nm,
+            upper_surface_flat_nm,
+        ) = self.__surface_hits_from_above(
+            ray_origins
         )
 
-        upper_surface_nm = self.__first_hit_z(
-            upper_origins,
-            direction_z=-1.0,
-        ).reshape(
+        lower_surface_nm = lower_surface_flat_nm.reshape(
             used_size.height,
             used_size.width,
         )
 
-        lower_surface_nm = self.__first_hit_z(
-            lower_origins,
-            direction_z=1.0,
-        ).reshape(
+        upper_surface_nm = upper_surface_flat_nm.reshape(
             used_size.height,
             used_size.width,
         )

@@ -13,7 +13,7 @@
 #     FOV = 100 nm -> slice = 1.0 nm
 #     FOV = 200 nm -> slice = 2.0 nm
 # Calculate the requested slice thickness as:
-DEPTH_SLICE_FOV_DIVISOR = 500.0
+DEPTH_SLICE_FOV_DIVISOR = 100.0
 
 # Prevent excessively small slices from creating too many depth planes.
 MINIMUM_DEPTH_SLICE_THICKNESS_NM = 0.1
@@ -87,7 +87,7 @@ STL_SAMPLE_SHIFT_Y_NM = 40.71017630395872
 STL_REFERENCE_THICKNESS_NM = 20.0
 
 # Maximum number of rays processed by trimesh in one batch.
-STL_RAY_CHUNK_SIZE = 32768
+STL_RAY_CHUNK_SIZE = 131072
 
 # ----------------------------------------------------------------------
 # STL intensity diagnostics

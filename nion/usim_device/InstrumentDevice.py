@@ -857,7 +857,17 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
         pixel_time_us = scan_frame_parameters.pixel_time_us
         assert fov_size_nm
         # Add some margin in case we need to rotate the data later
-        extra = int(math.ceil(max(size.height * math.sqrt(2) - size.height, size.width * math.sqrt(2) - size.width)))
+        if rotation == 0.0:
+            extra = 0
+        else:
+            extra = int(
+                math.ceil(
+                    max(
+                        size.height * math.sqrt(2) - size.height,
+                        size.width * math.sqrt(2) - size.width,
+                    )
+                )
+            )
         extra_nm = Geometry.FloatPoint(y=(extra / size.height) * fov_size_nm.height, x=(extra / size.width) * fov_size_nm.width)
         used_size = size + Geometry.IntSize(height=extra, width=extra)
         data: numpy.typing.NDArray[numpy.float32] = numpy.zeros(tuple(used_size), numpy.float32)
