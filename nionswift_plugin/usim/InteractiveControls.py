@@ -281,12 +281,16 @@ class InteractiveControlManager:
             return True
 
         frame_parameters.fov_nm = new_fov_nm
-        scan_hardware_source.set_current_frame_parameters(
-            frame_parameters
+
+        profile_index = scan_hardware_source.selected_profile_index
+        scan_hardware_source.set_frame_parameters(
+            profile_index,
+            frame_parameters,
         )
+
         logging.info("uSim FoV: %.3f nm", new_fov_nm)
         return True
-
+    
     def __change_defocus(self, delta_nm: float) -> bool:
         try:
             current_defocus_m = float(
