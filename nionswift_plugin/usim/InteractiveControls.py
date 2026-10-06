@@ -174,8 +174,12 @@ class InteractiveControlManager:
         if scan_hardware_source is None:
             return False
 
-        frame_parameters = (
-            scan_hardware_source.get_current_frame_parameters()
+        # Use the currently selected profile as the single FoV source of
+        # truth. This keeps double-click stage movement consistent with the
+        # FoV used by keyboard zoom and automated acquisitions.
+        profile_index = scan_hardware_source.selected_profile_index
+        frame_parameters = scan_hardware_source.get_frame_parameters(
+            profile_index
         )
         fov_size_nm = Geometry.FloatSize.make(
             frame_parameters.fov_size_nm
@@ -266,8 +270,12 @@ class InteractiveControlManager:
         if scan_hardware_source is None:
             return False
 
-        frame_parameters = (
-            scan_hardware_source.get_current_frame_parameters()
+        # Read the FoV from the currently selected scan profile. Do not use
+        # transient current frame parameters because they can be discarded
+        # when scanning stops or restarts.
+        profile_index = scan_hardware_source.selected_profile_index
+        frame_parameters = scan_hardware_source.get_frame_parameters(
+            profile_index
         )
         new_fov_nm = min(
             InteractiveControlSettings.MAXIMUM_FOV_NM,
@@ -282,15 +290,15 @@ class InteractiveControlManager:
 
         frame_parameters.fov_nm = new_fov_nm
 
-        profile_index = scan_hardware_source.selected_profile_index
+        # Write the new FoV back to the same profile. Updating the selected
+        # profile also synchronizes the current scan parameters.
         scan_hardware_source.set_frame_parameters(
             profile_index,
             frame_parameters,
         )
-
         logging.info("uSim FoV: %.3f nm", new_fov_nm)
         return True
-    
+
     def __change_defocus(self, delta_nm: float) -> bool:
         try:
             current_defocus_m = float(
