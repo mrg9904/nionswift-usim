@@ -89,6 +89,16 @@ STL_REFERENCE_THICKNESS_NM = 20.0
 # Maximum number of rays processed by trimesh in one batch.
 STL_RAY_CHUNK_SIZE = 131072
 
+# Evaluate vertical intersections directly on the scan pixel grid. Disable
+# only to compare against the original trimesh ray-intersection path.
+STL_USE_SURFACE_RASTERIZER = True
+
+# "auto" uses CUDA for larger grids when CuPy is installed, with a CPU
+# fallback. "cpu" avoids CUDA initialization; "gpu" also uses it for small
+# grids. Changing the backend requires restarting uSim.
+STL_SURFACE_BACKEND = "cpu"
+STL_GPU_MINIMUM_PIXELS = 512 * 512
+
 # ----------------------------------------------------------------------
 # STL intensity diagnostics
 # ----------------------------------------------------------------------

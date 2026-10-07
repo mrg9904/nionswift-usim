@@ -26,6 +26,37 @@ def _make_odd_filter_size(value: float) -> int:
     return filter_size
 
 
+def _filter_key(sigma_y_px: float, sigma_x_px: float) -> typing.Tuple[typing.Any, ...]:
+    """Describe the actual filter, allowing equal depth filters to share work."""
+    if (
+        SimulationSettings.USE_FAST_BOX_FILTER
+        and max(sigma_y_px, sigma_x_px) >= SimulationSettings.FAST_BOX_FILTER_THRESHOLD_PX
+    ):
+        passes = max(1, SimulationSettings.FAST_BOX_FILTER_PASSES)
+        return (
+            "box",
+            _make_odd_filter_size(math.sqrt(12.0 * sigma_y_px**2 / passes + 1.0)),
+            _make_odd_filter_size(math.sqrt(12.0 * sigma_x_px**2 / passes + 1.0)),
+            passes,
+        )
+    return ("gaussian", sigma_y_px, sigma_x_px)
+
+
+def _probe_sigma(
+    focus_error_nm: float,
+    convergence_angle_rad: float,
+    pixel_size_y_nm: float,
+    pixel_size_x_nm: float,
+    minimum_sigma_px: float,
+    maximum_sigma_px: float,
+) -> typing.Tuple[float, float]:
+    blur_nm = abs(convergence_angle_rad * focus_error_nm)
+    return (
+        min(math.sqrt(minimum_sigma_px**2 + (blur_nm / max(pixel_size_y_nm, 1e-12)) ** 2), maximum_sigma_px),
+        min(math.sqrt(minimum_sigma_px**2 + (blur_nm / max(pixel_size_x_nm, 1e-12)) ** 2), maximum_sigma_px),
+    )
+
+
 def _apply_probe_blur(
     data: _NDArray,
     sigma_y_px: float,
@@ -125,29 +156,19 @@ def apply_defocus(
         maximum_sigma_px = (
             SimulationSettings.MAXIMUM_SIGMA_PX
         )
-    focus_error_nm = (defocus_m - best_focus_m) * 1e9
-
-    # alpha is dimensionless (rad), so the result remains in nm.
-    blur_nm = abs(convergence_angle_rad * focus_error_nm)
-
-    sigma_y_px = math.sqrt(
-        minimum_sigma_px**2
-        + (blur_nm / max(pixel_size_y_nm, 1e-12)) ** 2
+    sigma_y_px, sigma_x_px = _probe_sigma(
+        (defocus_m - best_focus_m) * 1e9,
+        convergence_angle_rad,
+        pixel_size_y_nm,
+        pixel_size_x_nm,
+        minimum_sigma_px,
+        maximum_sigma_px,
     )
-
-    sigma_x_px = math.sqrt(
-        minimum_sigma_px**2
-        + (blur_nm / max(pixel_size_x_nm, 1e-12)) ** 2
-    )
-
-    # Avoid excessively expensive filtering at extreme defocus values.
-    sigma_y_px = min(sigma_y_px, maximum_sigma_px)
-    sigma_x_px = min(sigma_x_px, maximum_sigma_px)
 
     focused_data = _apply_probe_blur(
-    data,
-    sigma_y_px,
-    sigma_x_px,
+        data,
+        sigma_y_px,
+        sigma_x_px,
     )
 
     return focused_data.astype(numpy.float32, copy=False)
@@ -235,6 +256,7 @@ def apply_depth_planes_defocus(
         dtype=numpy.float32,
     )
 
+    groups: typing.Dict[typing.Tuple[typing.Any, ...], typing.Tuple[_NDArray, float, float]] = {}
     for depth_nm, plane_data in depth_planes:
         # The reference focus corresponds to the common base plane z = 0.
         plane_best_focus_m = (
@@ -242,16 +264,26 @@ def apply_depth_planes_defocus(
             + depth_nm * 1e-9
         )
 
-        focused_plane = apply_defocus(
-            plane_data,
-            defocus_m=defocus_m,
-            best_focus_m=plane_best_focus_m,
-            convergence_angle_rad=convergence_angle_rad,
-            pixel_size_y_nm=pixel_size_y_nm,
-            pixel_size_x_nm=pixel_size_x_nm,
+        sigma_y, sigma_x = _probe_sigma(
+            (defocus_m - plane_best_focus_m) * 1e9,
+            convergence_angle_rad,
+            pixel_size_y_nm,
+            pixel_size_x_nm,
+            SimulationSettings.MINIMUM_SIGMA_PX,
+            SimulationSettings.MAXIMUM_SIGMA_PX,
         )
+        key = _filter_key(sigma_y, sigma_x)
+        group = groups.get(key)
+        if group is None:
+            groups[key] = (plane_data.copy(), sigma_y, sigma_x)
+        else:
+            group[0][:] += plane_data
 
-        output += focused_plane
+    # Gaussian/box filtering is linear. Sum planes with the exact same
+    # discrete filter before filtering; do not quantize Gaussian sigmas.
+    # Cached sample planes must remain unchanged.
+    for plane_data, sigma_y, sigma_x in groups.values():
+        output += _apply_probe_blur(plane_data, sigma_y, sigma_x)
 
     return output
 

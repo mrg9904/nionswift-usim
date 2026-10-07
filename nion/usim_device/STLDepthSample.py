@@ -10,6 +10,7 @@ import trimesh
 
 from nion.usim_device import SampleSimulator
 from nion.usim_device import SimulationSettings
+from nion.usim_device import SurfaceRasterizer
 from nion.utils import Geometry
 
 
@@ -68,6 +69,7 @@ class STLDepthSample(SampleSimulator.Sample):
         )
 
         self.__mesh = mesh
+        self.__rasterizer = SurfaceRasterizer.SurfaceRasterizer(mesh.triangles)
 
         # RayMeshIntersector uses an R-tree spatial index to avoid checking
         # every ray against every triangle in the mesh.
@@ -311,46 +313,18 @@ class STLDepthSample(SampleSimulator.Sample):
             * pixel_height_nm
         )
 
-        xx_nm, yy_nm = numpy.meshgrid(
-            x_nm,
-            y_nm,
-        )
-
-        ray_count = (
-            used_size.height
-            * used_size.width
-        )
-
-        # Generate one downward ray from above the entire STL model.
-        ray_origins = numpy.empty(
-            (ray_count, 3),
-            dtype=numpy.float64,
-        )
-
-        ray_origins[:, 0] = xx_nm.ravel()
-        ray_origins[:, 1] = yy_nm.ravel()
-
-        ray_origins[:, 2] = (
-            self.__mesh.bounds[1, 2]
-            + 1.0
-        )
-
-        (
-            lower_surface_flat_nm,
-            upper_surface_flat_nm,
-        ) = self.__surface_hits_from_above(
-            ray_origins
-        )
-
-        lower_surface_nm = lower_surface_flat_nm.reshape(
-            used_size.height,
-            used_size.width,
-        )
-
-        upper_surface_nm = upper_surface_flat_nm.reshape(
-            used_size.height,
-            used_size.width,
-        )
+        if SimulationSettings.STL_USE_SURFACE_RASTERIZER:
+            lower_surface_nm, upper_surface_nm = self.__rasterizer.surface_maps(x_nm, y_nm)
+        else:
+            # Retain the original ray path for numerical comparisons.
+            xx_nm, yy_nm = numpy.meshgrid(x_nm, y_nm)
+            ray_origins = numpy.empty((xx_nm.size, 3), dtype=numpy.float64)
+            ray_origins[:, 0] = xx_nm.ravel()
+            ray_origins[:, 1] = yy_nm.ravel()
+            ray_origins[:, 2] = self.__mesh.bounds[1, 2] + 1.0
+            lower_flat, upper_flat = self.__surface_hits_from_above(ray_origins)
+            lower_surface_nm = lower_flat.reshape(used_size.height, used_size.width)
+            upper_surface_nm = upper_flat.reshape(used_size.height, used_size.width)
 
         upper_surface_nm = (
             upper_surface_nm.astype(

@@ -121,3 +121,21 @@ More Information
 ----------------
 
 - `Changelog <https://github.com/nion-software/nionswift-usim/blob/master/CHANGES.rst>`_
+
+STL HAADF performance
+---------------------
+The STL sample evaluates the mesh surfaces directly at scan pixel centers,
+avoiding a general ray-intersection query whenever the FoV changes. Depth
+planes that use the same discrete blur filter are summed before filtering.
+The depth spacing and specimen geometry are preserved.
+
+CPU acceleration is enabled by default. ``SimulationSettings.py`` provides
+``STL_USE_SURFACE_RASTERIZER=False`` for comparison with the original ray
+path. An optional CuPy CUDA rasterizer is available through
+``STL_SURFACE_BACKEND="auto"`` or ``"gpu"``; it falls back to CPU when CUDA
+is unavailable. Restart uSim after changing the backend. The GPU path is
+experimental and has not yet been validated on this development machine.
+
+Run the numerical regression checks in the Nion Swift environment::
+
+    python -m unittest nionswift_plugin.usim.test.HAADFPerformance_test -v
