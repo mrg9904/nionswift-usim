@@ -125,16 +125,51 @@ More Information
 STL HAADF performance
 ---------------------
 The STL sample evaluates the mesh surfaces directly at scan pixel centers,
-avoiding a general ray-intersection query whenever the FoV changes. Depth
-planes that use the same discrete blur filter are summed before filtering.
-The depth spacing and specimen geometry are preserved.
+avoiding a general ray-intersection query whenever the FoV changes. Near
+focus, it uses a spatial Gaussian. Larger blur uses a reflected-boundary
+frequency-domain Gaussian whose width continues to grow with defocus.
+STL depth spectra are cached within a 64 MiB budget and combined before a
+single inverse transform per image. The depth spacing and specimen geometry
+are preserved. At extreme defocus the image naturally approaches its mean.
 
-CPU acceleration is enabled by default. ``SimulationSettings.py`` provides
-``STL_USE_SURFACE_RASTERIZER=False`` for comparison with the original ray
-path. An optional CuPy CUDA rasterizer is available through
-``STL_SURFACE_BACKEND="auto"`` or ``"gpu"``; it falls back to CPU when CUDA
-is unavailable. Restart uSim after changing the backend. The GPU path is
-experimental and has not yet been validated on this development machine.
+``STL_SURFACE_BACKEND="auto"`` is the default: grids of at least 512 x 512
+use CUDA when available. Surfaces, depth slices, cached spectra, Gaussian
+blur and detector noise remain on the GPU; the final image is transferred
+to the CPU. Rotated scans transfer the ideal image before CPU rotation and
+noise. GPU spectra have a separate 512 MiB cache budget. Small grids and
+machines without CuPy/CUDA use the CPU path. ``"cpu"`` disables CUDA and
+``"gpu"`` also enables it for small grids. Restart uSim after changes.
+``STL_USE_SURFACE_RASTERIZER=False`` selects the original ray reference.
+
+Install the optional GPU dependency in the same environment as Nion Swift::
+
+    python -m pip install "cupy-cuda12x[ctk]"
+
+The package also exposes this dependency as the ``gpu`` extra, for example
+``python -m pip install -e ".[gpu]"`` from this checkout.
+
+An NVIDIA driver is required. The CUDA runtime packages are installed with
+the extra above. The backend has been validated on an RTX 4070 Laptop GPU.
+At 1028 x 1028, after CUDA initialization, representative FoV changes take
+about 39-64 ms including geometry, imaging, noise and transfer, compared
+with roughly 1.2-1.6 s of CPU geometry, imaging and noise. Initial CUDA setup and
+kernel compilation take longer and are cached between runs. These are
+computation times; acquisition still observes the requested pixel dwell.
+
+Run the synchronized benchmark (or use ``--backend cpu``)::
+
+    python tools/benchmark_haadf.py --backend gpu --size 1028
+
+HAADF uses Poisson electron-counting noise and optional detector read noise.
+Mean counts depend on intensity, beam current, dwell time and detection
+efficiency. Relative shot noise decreases as the inverse square root of
+dwell: at the reference 200 pA, ideal intensity 1 and efficiency 0.3, it is
+about 5.2% at 1 us, 2.6% at 4 us and 1.3% at 16 us. Integrated image
+brightness still increases with dwell; divide by dwell to compare normalized
+intensities. ``HAADF_SHOT_NOISE_ENABLED``, ``HAADF_DETECTION_EFFICIENCY`` and
+``HAADF_READ_NOISE_ELECTRONS`` in ``SimulationSettings.py`` configure this
+approximate detector model. Set shot noise off and read noise to zero for
+deterministic images.
 
 Run the numerical regression checks in the Nion Swift environment::
 

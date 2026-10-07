@@ -29,6 +29,7 @@ from nion.usim_device import SampleSimulator
 from nion.usim_device import HAADFFocusModel
 from nion.usim_device import SimulationSettings
 from nion.usim_device import STLDepthSample
+from nion.usim_device import Noise
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -807,6 +808,7 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
 
         # Define best focus
         self.best_focus_m = 0.0
+        self.__haadf_noise = Noise.HAADFNoise()
         # define the samples
         self.__samples = [
             SampleSimulator.RectangleFlakeSample(
@@ -939,6 +941,7 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
                 convergence_angle_rad=convergence_angle_rad,
                 pixel_size_y_nm=pixel_size_y_nm,
                 pixel_size_x_nm=pixel_size_x_nm,
+                return_device=rotation == 0.0,
             )
 
         elif isinstance(
@@ -981,9 +984,8 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
                 pixel_size_x_nm=pixel_size_x_nm,
             )
 
-        # Add noise after applying the defocus-dependent imaging response.
-        noise_factor = SimulationSettings.HAADF_NOISE_FACTOR
-        
+        # Apply detector noise after imaging and rotation, so rotation does
+        # not smooth random detector counts into correlated image noise.
         if rotation != 0:
             inner_height = size.height / used_size.height
             inner_width = size.width / used_size.width
@@ -995,4 +997,8 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
             data = rotated_data
         else:
             data = data[extra // 2:extra // 2 + size.height, extra // 2:extra // 2 + size.width]
-        return typing.cast(_NDArray, (data + numpy.random.randn(size.height, size.width) * noise_factor) * pixel_time_us)
+        data = self.__haadf_noise.apply(data, pixel_time_us, instrument.GetVal("BeamCurrent"))
+        # Non-rotated GPU acquisition transfers only the final noisy image.
+        if hasattr(data, "__cuda_array_interface__"):
+            return typing.cast(_NDArray, data.get())
+        return typing.cast(_NDArray, data)

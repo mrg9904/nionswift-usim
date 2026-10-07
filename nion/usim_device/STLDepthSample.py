@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import pathlib
 import typing
+import logging
 
 import numpy
 import numpy.typing
@@ -11,6 +12,7 @@ import trimesh
 from nion.usim_device import SampleSimulator
 from nion.usim_device import SimulationSettings
 from nion.usim_device import SurfaceRasterizer
+from nion.usim_device import HAADFFocusModel
 from nion.utils import Geometry
 
 
@@ -89,25 +91,14 @@ class STLDepthSample(SampleSimulator.Sample):
         # invalidate this cache because defocus does not change the geometry.
         self.__surface_cache_key: typing.Any = None
 
-        self.__surface_cache: typing.Optional[
-            typing.Tuple[
-                _NDArray,
-                _NDArray,
-            ]
-        ] = None
+        self.__surface_cache: typing.Optional[typing.Tuple[typing.Any, typing.Any]] = None
 
         # Cache the generated depth planes separately because their spacing
         # also depends on the current FOV-derived slice thickness.
         self.__depth_cache_key: typing.Any = None
 
-        self.__depth_cache: typing.Optional[
-            typing.List[
-                typing.Tuple[
-                    float,
-                    _NDArray,
-                ]
-            ]
-        ] = None
+        self.__depth_cache: typing.Optional[typing.Sequence[typing.Tuple[float, _NDArray]]] = None
+        self.__gpu_depth_enabled = True
 
     @property
     def title(self) -> str:
@@ -237,16 +228,17 @@ class STLDepthSample(SampleSimulator.Sample):
         extra_nm: Geometry.FloatPoint,
         center_nm: Geometry.FloatPoint,
         used_size: Geometry.IntSize,
-    ) -> typing.Tuple[_NDArray, _NDArray]:
+        *, on_gpu: bool = False,
+    ) -> typing.Tuple[typing.Any, typing.Any]:
         """Calculate lower and upper sample surfaces at every XY pixel."""
 
-        geometry_key = self.__geometry_key(
+        geometry_key = (on_gpu, self.__geometry_key(
             offset_m,
             fov_size_nm,
             extra_nm,
             center_nm,
             used_size,
-        )
+        ))
 
         if (
             geometry_key == self.__surface_cache_key
@@ -314,7 +306,7 @@ class STLDepthSample(SampleSimulator.Sample):
         )
 
         if SimulationSettings.STL_USE_SURFACE_RASTERIZER:
-            lower_surface_nm, upper_surface_nm = self.__rasterizer.surface_maps(x_nm, y_nm)
+            lower_surface_nm, upper_surface_nm = self.__rasterizer.surface_maps(x_nm, y_nm, on_gpu=on_gpu)
         else:
             # Retain the original ray path for numerical comparisons.
             xx_nm, yy_nm = numpy.meshgrid(x_nm, y_nm)
@@ -408,12 +400,7 @@ class STLDepthSample(SampleSimulator.Sample):
         center_nm: Geometry.FloatPoint,
         used_size: Geometry.IntSize,
         slice_thickness_nm: float,
-    ) -> typing.List[
-        typing.Tuple[
-            float,
-            _NDArray,
-        ]
-    ]:
+    ) -> typing.Sequence[typing.Tuple[float, _NDArray]]:
         """Convert the STL volume into uSim depth planes.
 
         Each returned item contains:
@@ -439,6 +426,9 @@ class STLDepthSample(SampleSimulator.Sample):
 
         depth_key = (
             geometry_key,
+            SimulationSettings.STL_NORMALIZE_COLUMN_INTENSITY,
+            SimulationSettings.STL_REFERENCE_THICKNESS_NM,
+            SimulationSettings.STL_NORMALIZED_COLUMN_INTENSITY,
             round(
                 slice_thickness_nm,
                 12,
@@ -450,6 +440,23 @@ class STLDepthSample(SampleSimulator.Sample):
             and self.__depth_cache is not None
         ):
             return self.__depth_cache
+
+        if (
+            self.__gpu_depth_enabled
+            and SimulationSettings.STL_USE_SURFACE_RASTERIZER
+            and self.__rasterizer.uses_gpu((used_size.height, used_size.width))
+        ):
+            try:
+                from nion.usim_device.GPUHAADF import GPUPreparedDepthPlanes
+                lower, upper = self.__calculate_surface_maps(
+                    offset_m, fov_size_nm, extra_nm, center_nm, used_size, on_gpu=True,
+                )
+                self.__depth_cache = GPUPreparedDepthPlanes(lower, upper, slice_thickness_nm)
+                self.__depth_cache_key = depth_key
+                return self.__depth_cache
+            except Exception:
+                self.__gpu_depth_enabled = False
+                logging.warning("uSim GPU depth preparation failed; using CPU", exc_info=True)
 
         lower_surface_nm, upper_surface_nm = (
             self.__calculate_surface_maps(
@@ -489,9 +496,9 @@ class STLDepthSample(SampleSimulator.Sample):
             ]
 
             self.__depth_cache_key = depth_key
-            self.__depth_cache = depth_planes
+            self.__depth_cache = HAADFFocusModel.PreparedDepthPlanes(depth_planes)
 
-            return depth_planes
+            return self.__depth_cache
 
         minimum_depth_nm = float(
             numpy.min(
@@ -642,6 +649,6 @@ class STLDepthSample(SampleSimulator.Sample):
                 plane_data *= column_scale
         
         self.__depth_cache_key = depth_key
-        self.__depth_cache = depth_planes
+        self.__depth_cache = HAADFFocusModel.PreparedDepthPlanes(depth_planes)
 
-        return depth_planes
+        return self.__depth_cache

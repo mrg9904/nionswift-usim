@@ -96,7 +96,7 @@ STL_USE_SURFACE_RASTERIZER = True
 # "auto" uses CUDA for larger grids when CuPy is installed, with a CPU
 # fallback. "cpu" avoids CUDA initialization; "gpu" also uses it for small
 # grids. Changing the backend requires restarting uSim.
-STL_SURFACE_BACKEND = "cpu"
+STL_SURFACE_BACKEND = "auto"
 STL_GPU_MINIMUM_PIXELS = 512 * 512
 
 # ----------------------------------------------------------------------
@@ -121,11 +121,20 @@ STL_NORMALIZED_COLUMN_INTENSITY = 1.0
 # Minimum probe width in pixels, including the nominal in-focus probe.
 MINIMUM_SIGMA_PX = 0.25
 
-# Maximum permitted defocus blur.
-#
-# This is the most important parameter for preventing very large
-# convolution kernels at large defocus.
-MAXIMUM_SIGMA_PX = 10.0
+# Switch to a reflected-boundary frequency-domain Gaussian at this width.
+# Sigma continues growing with defocus; this is not a blur limit.
+FOURIER_BLUR_THRESHOLD_PX = 3.0
+
+# Ignore frequency weights below this value when combining depth spectra.
+# This is far below float32 image precision; it is not a defocus limit.
+FOURIER_TRANSFER_CUTOFF = 1e-10
+
+# Maximum extra memory per STL sample for reusable depth-plane spectra.
+# Beyond the budget, transforms are computed without retaining them.
+DEPTH_SPECTRUM_CACHE_BYTES = 64 * 1024 * 1024
+
+# GPU spectra remain on-device. Bound the cache separately from host RAM.
+GPU_DEPTH_SPECTRUM_CACHE_BYTES = 512 * 1024 * 1024
 
 # The Gaussian kernel is truncated at:
 #
@@ -137,29 +146,15 @@ GAUSSIAN_TRUNCATE = 3.0
 
 
 # ----------------------------------------------------------------------
-# Fast large-blur approximation
-# ----------------------------------------------------------------------
-
-# If True, replace large Gaussian filters with repeated box filters.
-# This substantially improves performance at large defocus.
-USE_FAST_BOX_FILTER = True
-
-# Use the fast approximation when either sigma exceeds this value.
-FAST_BOX_FILTER_THRESHOLD_PX = 3.0
-
-# Three box-filter passes provide a reasonable Gaussian approximation.
-FAST_BOX_FILTER_PASSES = 3
-
-# ----------------------------------------------------------------------
 # HAADF noise
 # ----------------------------------------------------------------------
 
-# Standard deviation of the additive Gaussian noise applied to the
-# simulated HAADF image before multiplication by pixel_time_us.
-#
-# Suggested values:
-#     0.0  -> no noise, useful for geometry debugging
-#     0.01 -> very low noise
-#     0.05 -> moderate noise
-#     0.3  -> original uSim noise level
-HAADF_NOISE_FACTOR = 0.0
+# Electron-counting shot noise is enabled by default. The detected count
+# for an ideal intensity of 1 is BeamCurrent / elementary_charge * dwell
+# time * efficiency. At 200 pA and 1 us, 0.3 gives about 374 electrons and
+# 5.2% relative shot noise. Four times the dwell halves relative noise.
+HAADF_SHOT_NOISE_ENABLED = True
+HAADF_DETECTION_EFFICIENCY = 0.3
+
+# Optional additive detector read noise, in detected electrons per pixel.
+HAADF_READ_NOISE_ELECTRONS = 0.5

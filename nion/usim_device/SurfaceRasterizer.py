@@ -45,9 +45,8 @@ class SurfaceRasterizer:
         self,
         x_nm: numpy.typing.NDArray[numpy.float64],
         y_nm: numpy.typing.NDArray[numpy.float64],
-    ) -> tuple[numpy.typing.NDArray[numpy.float32], numpy.typing.NDArray[numpy.float32]]:
-        lower = numpy.full((y_nm.size, x_nm.size), numpy.inf, dtype=numpy.float64)
-        upper = numpy.full_like(lower, -numpy.inf)
+        *, on_gpu: bool = False,
+    ) -> typing.Tuple[typing.Any, typing.Any]:
         # Restrict work to triangles whose bounding boxes contain pixel
         # centers. searchsorted also clips triangles outside the current FoV.
         left = numpy.searchsorted(x_nm, self._minimum[:, 0], side="left")
@@ -61,10 +60,12 @@ class SurfaceRasterizer:
         ):
             bounds = numpy.column_stack((left[candidates], right[candidates], top[candidates], bottom[candidates])).astype(numpy.int32)
             try:
-                return self._gpu.surface_maps(x_nm, y_nm, candidates, bounds)
+                return self._gpu.surface_maps(x_nm, y_nm, candidates, bounds, on_gpu=on_gpu)
             except Exception:
                 self._gpu = None
                 logging.warning("uSim CUDA surface calculation failed; using CPU", exc_info=True)
+        lower = numpy.full((y_nm.size, x_nm.size), numpy.inf, dtype=numpy.float64)
+        upper = numpy.full_like(lower, -numpy.inf)
         for index in candidates:
             rows = slice(top[index], bottom[index])
             columns = slice(left[index], right[index])
@@ -84,3 +85,9 @@ class SurfaceRasterizer:
         lower[missing] = numpy.nan
         upper[missing] = numpy.nan
         return lower.astype(numpy.float32), upper.astype(numpy.float32)
+
+    def uses_gpu(self, shape: typing.Tuple[int, int]) -> bool:
+        return self._gpu is not None and (
+            SimulationSettings.STL_SURFACE_BACKEND == "gpu"
+            or shape[0] * shape[1] >= SimulationSettings.STL_GPU_MINIMUM_PIXELS
+        )
