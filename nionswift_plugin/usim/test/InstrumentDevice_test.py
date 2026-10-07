@@ -147,6 +147,8 @@ class TestInstrumentDevice(unittest.TestCase):
     def test_eels_data_thickness_is_consistent(self) -> None:
         with self._test_context() as test_context:
             instrument = typing.cast(InstrumentDevice_.Instrument, test_context.instrument)
+            # Measure the reference flake at the origin, independently of startup defaults.
+            instrument.stage_position_m = Geometry.FloatPoint()
             camera_simulator, scan_simulator = create_camera_and_scan_simulator(instrument, "eels")
             # use the flake sample
             scan_data_generator = typing.cast(InstrumentDevice_.ScanDataGenerator, instrument.scan_data_generator)

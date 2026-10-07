@@ -277,12 +277,9 @@ class InteractiveControlManager:
         frame_parameters = scan_hardware_source.get_frame_parameters(
             profile_index
         )
-        new_fov_nm = min(
-            InteractiveControlSettings.MAXIMUM_FOV_NM,
-            max(
-                InteractiveControlSettings.MINIMUM_FOV_NM,
-                frame_parameters.fov_nm * factor,
-            ),
+        new_fov_nm = max(
+            InteractiveControlSettings.MINIMUM_FOV_NM,
+            frame_parameters.fov_nm * factor,
         )
 
         if math.isclose(new_fov_nm, frame_parameters.fov_nm):

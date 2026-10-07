@@ -417,7 +417,7 @@ class ValueManager(Observable.Observable, InstrumentDevice.ValueManagerLike):
     def __create_built_in_controls(self) -> typing.List[typing.Union[Variable, Control2D]]:
         zlp_tare_control = Control("ZLPtare")
         zlp_offset_control = Control("ZLPoffset", -20, [(zlp_tare_control, 1.0)])
-        stage_position_m = Control2D("stage_position_m", ("x", "y"))
+        stage_position_m = Control2D("stage_position_m", ("x", "y"), local_values=(1222e-9, 279e-9))
         beam_current = Control("BeamCurrent", 200e-12)
         # monochromator controls
         mc_exists = Control("S_MC_InsideColumn", local_value=8)  # Used by tuning to check if scope has a monochromator
@@ -438,7 +438,7 @@ class ValueManager(Observable.Observable, InstrumentDevice.ValueManagerLike):
         s_moa = Control("S_MOA")
         convergence_angle = Control("ConvergenceAngle", 0.04)
         voltage = Control("EHT", 100000)
-        c10 = Control("C10", 500 / 1e9)
+        c10 = Control("C10", 0.0)
         c12 = Control2D("C12", ("x", "y"))
         c21 = Control2D("C21", ("x", "y"))
         c23 = Control2D("C23", ("x", "y"))

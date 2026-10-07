@@ -61,7 +61,6 @@ FOV_ZOOM_IN_FACTOR = 0.8
 FOV_ZOOM_OUT_FACTOR = 1.25
 
 MINIMUM_FOV_NM = 5.0
-MAXIMUM_FOV_NM = 10000.0
 
 # D decreases C10 and F increases it by this amount. C10 is the value shown
 # in the uSim Instrument panel and feeds the effective C10Control used by the

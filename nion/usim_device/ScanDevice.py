@@ -137,8 +137,8 @@ class ScanModule(scan_base.ScanModule):
         self.device = ScanDevice.Device("usim_scan_device", _("uSim Scan"), instrument, ScanBoxSimulator(instrument.scan_data_generator))
         setattr(self.device, "priority", 20)
         scan_modes = (
-            scan_base.ScanSettingsMode(_("Fast"), "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 0.1)),
-            scan_base.ScanSettingsMode(_("Slow"), "slow", ScanDevice.ScanFrameParameters(pixel_size=(512, 512), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 0.4)),
-            scan_base.ScanSettingsMode(_("Record"), "record", ScanDevice.ScanFrameParameters(pixel_size=(1024, 1024), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 1.0))
+            scan_base.ScanSettingsMode(_("Fast"), "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=10000.0)),
+            scan_base.ScanSettingsMode(_("Slow"), "slow", ScanDevice.ScanFrameParameters(pixel_size=(512, 512), pixel_time_us=1, fov_nm=10000.0)),
+            scan_base.ScanSettingsMode(_("Record"), "record", ScanDevice.ScanFrameParameters(pixel_size=(1024, 1024), pixel_time_us=1, fov_nm=10000.0))
         )
         self.settings = scan_base.ScanSettings(self.device.scan_device_id, scan_modes, lambda d: ScanDevice.ScanFrameParameters(d), 0, 2)

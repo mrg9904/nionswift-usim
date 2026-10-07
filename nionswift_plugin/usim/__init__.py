@@ -12,6 +12,7 @@ def run() -> None:
 
     acquisition_context_configuration = (
         DeviceConfiguration.AcquisitionContextConfiguration(
+            sample_index=6,  # STL sample.
             set_configuration_location=False
         )
     )
