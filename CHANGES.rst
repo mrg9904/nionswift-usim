@@ -3,6 +3,18 @@ Changelog (nionswift-usim)
 
 Unreleased
 ----------
+- Cache Ronchigram specimen projections, nonlinear mappings and broadened
+  Kikuchi patterns; add optional CUDA interpolation, composition and fresh
+  electron-counting noise with CPU fallback and a reproducible latency benchmark.
+- Add CIF-driven geometric Kikuchi lines for the spherical particle, with
+  [001] initial orientation, local thickness and live stage TX/TY controls.
+- Fix zero-aberration Ronchigram transmission and angular readout/bin calibration.
+- Include higher-order Kikuchi reflectors, remove the uninserted virtual
+  aperture restriction and use per-pixel electron shot noise on Ronchigrams.
+- Combine sphere transmission, a diffuse background and local thickness-dependent
+  Kikuchi broadening/attenuation; add component and thickness-profile review plots.
+- Generate Kikuchi contrast for all projected specimen rays, including when
+  the beam centre is in vacuum but the defocused beam illuminates the particle.
 - Use local STL/spherical/block specimen thickness for EELS instead of fixed feature counts.
 - Add thickness-dependent compound-Poisson plural loss, window-conserving channel integration,
   independent energy binning, electron-counting noise and geometry metadata.

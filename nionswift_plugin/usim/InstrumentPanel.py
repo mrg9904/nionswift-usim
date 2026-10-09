@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # standard libraries
 import gettext
+import math
 import typing
 
 # local libraries
@@ -92,7 +93,8 @@ class ControlBinding(Binding.Binding):
 class PositionWidget(Widgets.CompositeWidgetBase):
 
     def __init__(self, ui: UserInterface.UserInterface, label: str, value_manager: InstrumentDevice_.ValueManager,
-                 xy_property: str, unit: str = "nm", multiplier: float = 1E9) -> None:
+                 xy_property: str, unit: str = "nm", multiplier: float = 1E9,
+                 axis_labels: typing.Tuple[str, str] = ("X", "Y")) -> None:
         row_widget = ui.create_row_widget()
         super().__init__(row_widget)
 
@@ -105,11 +107,11 @@ class PositionWidget(Widgets.CompositeWidgetBase):
         row_widget.add_spacing(8)
         row_widget.add(ui.create_label_widget(label))
         row_widget.add_spacing(8)
-        row_widget.add(ui.create_label_widget(_("X")))
+        row_widget.add(ui.create_label_widget(_(axis_labels[0])))
         row_widget.add_spacing(8)
         row_widget.add(stage_x_field)
         row_widget.add_spacing(8)
-        row_widget.add(ui.create_label_widget(_("Y")))
+        row_widget.add(ui.create_label_widget(_(axis_labels[1])))
         row_widget.add_spacing(8)
         row_widget.add(stage_y_field)
         row_widget.add_spacing(8)
@@ -136,6 +138,8 @@ class InstrumentWidget(Widgets.CompositeWidgetBase):
         beam_current_field.bind_text(ControlBinding(value_manager, "BeamCurrent", converter=Converter.PhysicalValueToStringConverter(units="pA", multiplier=1E12)))
 
         stage_position_widget = PositionWidget(ui, _("Stage"), value_manager, "stage_position_m")
+        stage_tilt_widget = PositionWidget(ui, _("Stage tilt"), value_manager, "stage_tilt_rad",
+            unit="deg", multiplier=180/math.pi, axis_labels=("TX", "TY"))
 
         beam_shift_widget = PositionWidget(ui, _("Beam"), value_manager, "beam_shift_m")
 
@@ -241,6 +245,7 @@ class InstrumentWidget(Widgets.CompositeWidgetBase):
         column_widget.add(voltage_row)
         column_widget.add(beam_current_row)
         column_widget.add(stage_position_widget)
+        column_widget.add(stage_tilt_widget)
         column_widget.add(beam_shift_widget)
         column_widget.add(defocus_row)
         column_widget.add(c12_widget)

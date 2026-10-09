@@ -188,7 +188,7 @@ class Camera(camera_base.CameraDevice3):
         start of the acquisition thread.
         """
         xdata_buffer = None
-        simulation_metadata = None
+        simulation_metadata = {}
         integration_count = self.__integration_count or 1
         for frame_number in range(integration_count):
             if direct:
@@ -199,7 +199,9 @@ class Camera(camera_base.CameraDevice3):
             self.__has_data_event.clear()
             if xdata_buffer is None:
                 xdata_buffer = copy.deepcopy(self.__xdata_buffer)
-                simulation_metadata = copy.deepcopy(xdata_buffer.metadata.get("eels_simulation")) if xdata_buffer else None
+                simulation_metadata = {key: copy.deepcopy(xdata_buffer.metadata[key])
+                    for key in ('eels_simulation', 'kikuchi_simulation')
+                    if xdata_buffer and key in xdata_buffer.metadata}
             elif self.__xdata_buffer:
                 xdata_buffer += self.__xdata_buffer
         self.__frame_number += 1
@@ -215,8 +217,7 @@ class Camera(camera_base.CameraDevice3):
         data_element["properties"] = dict()
         data_element["properties"]["frame_number"] = self.__frame_number
         data_element["properties"]["integration_count"] = integration_count
-        if simulation_metadata is not None:
-            data_element["properties"]["eels_simulation"] = simulation_metadata
+        data_element["properties"].update(simulation_metadata)
         # data that has been binned vertically to a single row will be converted to 1D
         if xdata_buffer.dimensional_shape[0] == 1:
             data_element["data"] = numpy.squeeze(xdata_buffer._data_ex)

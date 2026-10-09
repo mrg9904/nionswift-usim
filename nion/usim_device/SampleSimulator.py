@@ -1,6 +1,7 @@
 # standard libraries
 import abc
 import math
+from pathlib import Path
 
 from nion.usim_device import EELSModel
 import gettext
@@ -957,6 +958,9 @@ class SphericalParticleSample(Sample):
 
     def __init__(self, stage_size_nm: float) -> None:
         _ = stage_size_nm
+
+        self.crystal_cif_path = str(Path(__file__).with_name('samples') / 'NNMTO_pristine.cif')
+        self.zone_axis = (0, 0, 1)
 
         self.__features: typing.List[Feature] = [
             SphericalParticleFeature(

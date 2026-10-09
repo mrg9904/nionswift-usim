@@ -238,6 +238,95 @@ native DLL search paths are available)::
 
 Outputs are local and ignored under ``tools/eels_thickness_results/``.
 
+CIF-driven geometric Kikuchi lines
+---------------------------------
+
+The Spherical Particle sample uses ``samples/NNMTO_pristine.cif``, copied
+from the supplied test CIF and packaged with uSim. Gemmi expands its
+symmetry and mixed occupancies. The crystal's ``zone_axis`` defaults to
+``(0, 0, 1)``: c is parallel to z, and a to x. This trigonal crystal has
+a 120-degree a/b angle; b is therefore not parallel to Cartesian y.
+
+In Simulator Instrument, Stage tilt TX/TY appears below Stage X/Y.
+Fields display degrees; ``stage_tilt_rad.x`` and ``stage_tilt_rad.y`` use
+radians in scripts. Active right-handed laboratory-axis rotations are
+applied as ``R_y(TY) @ R_x(TX)``. Tilts are shared instrument controls,
+like Stage X/Y, and are not separate Fast/Slow/Record scan settings.
+
+Select Spherical Particle, acquire and stop HAADF, enable Positioned,
+and play the Ronchigram camera. Park the probe on the sphere and change
+TX/TY to move the Kikuchi lines. Lines appear wherever projected rays
+cross the crystal, even with the beam centre in vacuum. They disappear
+when no specimen rays remain in the camera field. The model reads EHT,
+ConvergenceAngle and the same central-probe-coordinate
+mapping/local sphere chord thickness as EELS. The spherical shape and
+chord are invariant under rotation; the crystal orientation changes.
+
+Electron form factors (Gemmi C4322), site occupancies and isotropic
+displacement parameters weight reflections. For each plane, paired
+Bragg cones are projected onto the detector using relativistic electron
+wavelength. Reflections with d >= 0.75 angstrom and relative intensity
+above 1e-5 are considered, with up to 160 visible plane pairs. The
+``KIKUCHI_D_MIN_ANGSTROM`` and ``KIKUCHI_MAX_BANDS`` settings control this
+coverage. Lower d_min includes additional high-order reflections. Line
+positions/band widths follow crystal geometry; Gaussian bright/dark
+line profiles and the thickness visibility envelope are illustrative.
+The spherical sample uses exponential bright-field transmission rather
+than subtracting its weak HAADF intensity from a large vacuum constant.
+The existing aberration mapper produces the real-space specimen image;
+this is mixed with a smooth diffuse background and signed Kikuchi contrast.
+Angular Gaussian broadening grows as sqrt(projected thickness), with
+different local widths across one defocused sphere. A thickness build-up
+and attenuation envelope damps ordered line contrast. Peaks are not
+renormalized after broadening. The four transmission/diffuse/broadening
+parameters in SimulationSettings are phenomenological display controls,
+not scattering constants determined from the CIF. At exact zero defocus
+an ideal ray-mapping model has no resolved real-space sphere silhouette.
+This is not a multislice or dynamical-intensity calculation. Without an
+inserted aperture, lines cover specimen pixels throughout the camera
+angular field. Inserting VOA/MOA applies the actual aperture mask, whose
+size follows ConvergenceAngle. The existing aberration image restricts
+lines to projected specimen pixels. Independent electron-counting shot
+noise is sampled from each pixel's intensity on every live frame, both
+on the specimen and in vacuum; zero-signal pixels have zero shot noise.
+At zero defocus the specimen can fill the whole detector. EELS chemistry retains
+the previous Ni-like model; loading a CIF for diffraction does not
+assign new EELS edges.
+
+Changing ``sample.zone_axis`` updates the next frame. To use another
+CIF, assign ``sample.crystal_cif_path`` to its absolute path. CIF files
+are cached; restart after editing the contents of a file at the same
+path. Diffraction frames include ``kikuchi_simulation`` metadata (the
+installed Nion live bridge may drop custom metadata, as for EELS).
+
+Generate review data using ``python tools/preview_kikuchi.py --data-only``
+in nionswift-dev. ``--render-only`` needs Matplotlib. Outputs are ignored
+under ``tools/kikuchi_results/``.
+
+Ronchigram updates cache the spherical specimen projection, nonlinear
+aberration mapping and thickness-broadened Kikuchi patterns independently.
+Probe motion changes only the ray displacement and local composition.
+Stage position or sphere geometry invalidates the specimen projection;
+tilt, voltage, zone axis and readout geometry invalidate the diffraction bank.
+The bank belongs to one camera, is replaced on changes and is released on close.
+
+``SimulationSettings.RONCHIGRAM_BACKEND`` defaults to ``"auto"``. With the
+optional ``gpu`` dependencies and a working NVIDIA CUDA device, frames of
+512 x 512 or larger use CuPy for ray interpolation, diffuse composition and
+electron-counting noise. Specimen/mapping arrays stay in GPU memory between
+probe moves. Smaller frames use CPU; CUDA initialization or execution errors
+fall back to CPU. Set the backend to ``"cpu"`` to disable CUDA, or ``"gpu"``
+to attempt CUDA also for small frames. The blur-bank budget defaults to 256 MiB
+per camera. This does not reduce output resolution or remove shot noise.
+The first CUDA frame can take longer while kernels are compiled and cached.
+
+Run ``python tools/benchmark_ronchigram.py`` in nionswift-dev to compare
+full moving-probe frame latency, including fresh noise, at 1024 and 2048
+pixels per axis. Results are saved to
+``tools/kikuchi_results/ronchigram_performance.json``. These are simulator
+computation times; camera exposure and Nion display overhead also affect
+the visible live refresh rate.
+
 
 Sample-specific initial views
 -----------------------------

@@ -165,3 +165,19 @@ HAADF_READ_NOISE_ELECTRONS = 0.5
 STL_EELS_EDGES = ((68, 30), (855, 50), (872, 50))
 STL_EELS_PLASMON_EV = 20.0
 STL_EELS_MEAN_FREE_PATH_NM = 100.0
+
+# Kikuchi reflector coverage. 0.75 A includes the next family omitted by
+# the old 1 A limit. Lower further for more high-order lines (more CPU work).
+KIKUCHI_D_MIN_ANGSTROM = 0.75
+KIKUCHI_MAX_BANDS = 160
+
+# Phenomenological Ronchigram contrast/scattering parameters, not fitted
+# elastic/inelastic mean free paths or dynamical diffraction predictions.
+RONCHIGRAM_TRANSMISSION_LENGTH_NM = 150.0
+RONCHIGRAM_DIFFUSE_LENGTH_NM = 120.0
+RONCHIGRAM_DIFFUSE_SIGMA_RAD = 0.003
+KIKUCHI_BROADENING_RAD_AT_100_NM = 0.0008
+# Ronchigram blur banks are local to each camera and replaced on geometry changes.
+RONCHIGRAM_BACKEND = "auto"  # auto, cpu, gpu (CUDA failures fall back to CPU)
+RONCHIGRAM_GPU_MINIMUM_PIXELS = 512 * 512
+RONCHIGRAM_PATTERN_CACHE_BYTES = 256 * 1024 * 1024

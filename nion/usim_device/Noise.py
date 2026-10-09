@@ -3,6 +3,7 @@ import numpy
 import numpy.typing
 import typing
 import math
+import logging
 
 from nion.data import DataAndMetadata
 from nion.usim_device import SimulationSettings
@@ -79,7 +80,7 @@ class PoissonNoise:
 
 
 
-class EELSShotNoise:
+class ElectronCountingNoise:
     """Sample actual electrons per channel; preserve calibrations and metadata."""
 
     def __init__(self, counts_per_electron: float, seed: typing.Optional[int] = None) -> None:
@@ -88,6 +89,39 @@ class EELSShotNoise:
         self.enabled = True
         self._gain = counts_per_electron
         self._rng = numpy.random.default_rng(seed)
+        self._seed = seed
+        self._gpu_rng = None
+        self._gpu_source = None
+        self._gpu_data = None
+        self._gpu_failed = False
+
+    def clear_gpu_cache(self) -> None:
+        self._gpu_source = self._gpu_data = self._gpu_rng = None
+
+    def apply_gpu(self, source: DataAndMetadata.DataAndMetadata, scale: float) -> DataAndMetadata.DataAndMetadata:
+        """Same electron-counting model on CUDA, with fresh draws every frame."""
+        if not self.enabled or self._gpu_failed:
+            return self.apply(source*scale)
+        try:
+            import cupy as cp
+            if self._gpu_rng is None:
+                self._gpu_rng = cp.random.RandomState(self._seed)
+            if self._gpu_source is not source:
+                self._gpu_data = cp.asarray(source._data_ex)
+                self._gpu_source = source
+            electrons = cp.maximum(self._gpu_data, 0)*(scale/self._gain)
+            sampled = (self._gpu_rng.poisson(electrons)*self._gain).astype(self._gpu_data.dtype)
+            return DataAndMetadata.new_data_and_metadata(cp.asnumpy(sampled),
+                intensity_calibration=source.intensity_calibration,
+                dimensional_calibrations=source.dimensional_calibrations,
+                metadata=source.metadata, timestamp=source.timestamp,
+                data_descriptor=source.data_descriptor,
+                timezone=source.timezone, timezone_offset=source.timezone_offset)
+        except Exception as error:
+            logging.getLogger(__name__).warning("Ronchigram GPU noise failed; using CPU: %s", error)
+            self._gpu_failed = True
+            self.clear_gpu_cache()
+            return self.apply(source*scale)
 
     def apply(self, source: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
         if not self.enabled:
@@ -100,3 +134,7 @@ class EELSShotNoise:
             metadata=source.metadata, timestamp=source.timestamp,
             data_descriptor=source.data_descriptor,
             timezone=source.timezone, timezone_offset=source.timezone_offset)
+
+
+# Compatibility for the existing EELS camera API.
+EELSShotNoise = ElectronCountingNoise
