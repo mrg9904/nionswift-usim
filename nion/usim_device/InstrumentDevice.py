@@ -422,6 +422,7 @@ class ValueManager(Observable.Observable, InstrumentDevice.ValueManagerLike):
         zlp_offset_control = Control("ZLPoffset", -20, [(zlp_tare_control, 1.0)])
         stage_position_m = Control2D("stage_position_m", ("x", "y"), local_values=(0.0, 0.0))
         stage_tilt_rad = Control2D("stage_tilt_rad", ("x", "y"))
+        stage_z_m = Control("stage_z_m", 0.0)
         beam_current = Control("BeamCurrent", 200e-12)
         # monochromator controls
         mc_exists = Control("S_MC_InsideColumn", local_value=8)  # Used by tuning to check if scope has a monochromator
@@ -478,7 +479,7 @@ class ValueManager(Observable.Observable, InstrumentDevice.ValueManagerLike):
         # This is needed in the dectris plugins
         ht_kv = Variable("SuperFEG_HTkV")
         ht_kv.set_expression("EHT * 0.001", variables={"EHT": voltage})
-        return [stage_position_m, stage_tilt_rad, zlp_tare_control, zlp_offset_control, c10, c12, c21, c23, c30, c32, c34, c10Control,
+        return [stage_position_m, stage_tilt_rad, stage_z_m, zlp_tare_control, zlp_offset_control, c10, c12, c21, c23, c30, c32, c34, c10Control,
                 c12Control, c21Control, c23Control, c30Control, c32Control, c34Control, csh, drift, beam_current,
                 beam_shift_m_control, order_1_max_angle, order_2_max_angle, order_3_max_angle, c1_range, c2_range,
                 c3_range, c_aperture, aperture_round, s_voa, s_moa, c_aperture_offset, mc_exists, slit_tilt, slit_C10,
@@ -926,7 +927,7 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
             )
         # Read the current defocus and convergence semi-angle.
         # In uSim, C10 is expressed in meters and ConvergenceAngle in radians.
-        defocus_m = instrument.GetVal("C10Control")
+        defocus_m = instrument.GetVal("C10Control") - instrument.GetVal("stage_z_m")
         convergence_angle_rad = instrument.GetVal("ConvergenceAngle")
 
         # Calculate the pixel size, including the additional rotation margin,

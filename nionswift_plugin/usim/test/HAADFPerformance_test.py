@@ -200,7 +200,7 @@ class TestGPUHAADF(unittest.TestCase):
         instrument = types.SimpleNamespace(
             value_manager=types.SimpleNamespace(actual_offset_m=Geometry.FloatPoint()),
             GetVal2D=lambda key: Geometry.FloatPoint(),
-            GetVal=lambda key: {"C10Control": 500e-9, "ConvergenceAngle": .04,
+            GetVal=lambda key: {"C10Control": 500e-9, "stage_z_m": 0., "ConvergenceAngle": .04,
                                 "BeamCurrent": 200e-12}[key])
         with mock.patch.object(SimulationSettings, "STL_SURFACE_BACKEND", "gpu"):
             generator = InstrumentDevice.ScanDataGenerator(sample_index=6)

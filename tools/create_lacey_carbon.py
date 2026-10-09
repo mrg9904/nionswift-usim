@@ -69,7 +69,7 @@ def extrude_mask(mask, size_nm=54000., thickness_nm=5.):
     return mesh
 
 
-def copper_frame(outer_nm=100000., opening_nm=54000., thickness_nm=10000.):
+def copper_frame(outer_nm=85000., opening_nm=54000., thickness_nm=10000.):
     outer = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]])*outer_nm/2
     inner = outer*opening_nm/outer_nm
     xy = np.vstack((outer, inner))
@@ -103,20 +103,20 @@ def generate(template, output, threshold=None, stl_output=STL_SAMPLES):
     carbon = extrude_mask(mask)
     copper = copper_frame()
     carbon_volume = float(mask.sum())*(54000.**2/mask.size)*5
-    copper_volume = (100000.**2-54000.**2)*10000
+    copper_volume = (85000.**2-54000.**2)*10000
     verify(carbon, carbon_volume)
     verify(copper, copper_volume)
     combined = trimesh.util.concatenate((carbon, copper))
     meshes = {'lacey_carbon_54um_5nm_pixelated.stl': (carbon, carbon_volume),
-              'copper_grid_100um_10um.stl': (copper, copper_volume),
+              'copper_grid_85um_10um.stl': (copper, copper_volume),
               'lacey_carbon_with_copper_grid_pixelated.stl': (combined, carbon_volume+copper_volume)}
     info = {'coordinate_unit': 'nm', 'origin': 'XY centre; both solids start at z=0',
             'template': template.name, 'template_sha256': hashlib.sha256(template.read_bytes()).hexdigest(),
             'template_shape_px': list(gray.shape), 'dark_threshold_inclusive': threshold,
             'diagonal_contact_pixels_filled': repaired, 'carbon_area_fraction': float(mask.mean()),
             'carbon_components': int(label(mask)[1]), 'carbon_size_nm': [54000, 54000, 5],
-            'copper_outer_size_nm': [100000, 100000, 10000], 'copper_opening_size_nm': [54000, 54000],
-            'copper_frame_width_nm': 23000, 'parts': {}}
+            'copper_outer_size_nm': [85000, 85000, 10000], 'copper_opening_size_nm': [54000, 54000],
+            'copper_frame_width_nm': 15500, 'parts': {}}
     for filename, (mesh, volume) in meshes.items():
         path = stl_output/filename
         mesh.export(path, file_type='stl')
@@ -129,8 +129,8 @@ def generate(template, output, threshold=None, stl_output=STL_SAMPLES):
     drawing = ImageDraw.Draw(preview)
     drawing.rectangle((50, 50, 1050, 1050), fill='#b77942')
     film = Image.fromarray(np.where(mask, 45, 255).astype(np.uint8)).convert('RGB')
-    preview.paste(film.resize((540, 540), Image.Resampling.NEAREST), (280, 280))
-    drawing.text((50, 1080), 'Top view: outer copper frame 100 x 100 um; central opening 54 x 54 um', fill='black')
+    preview.paste(film.resize((635, 635), Image.Resampling.NEAREST), (232, 232))
+    drawing.text((50, 1080), 'Top view: outer copper frame 85 x 85 um; central opening 54 x 54 um', fill='black')
     drawing.text((50, 1110), 'Dark carbon: 5 nm thick. Copper: 10 um thick. White: vacuum.', fill='black')
     preview.save(output/'lacey_carbon_grid_top_view.png')
     (output/'model_info.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
@@ -138,7 +138,7 @@ def generate(template, output, threshold=None, stl_output=STL_SAMPLES):
         'All STL coordinates are in nanometres (STL has no embedded unit or material).\n'
         f'STL storage directory: {stl_output.resolve()}\n'
         'Carbon: 54000 x 54000 nm footprint, z=0..5 nm, dark template regions only.\n'
-        'Copper: 100000 x 100000 nm outer frame, 54000 x 54000 nm opening, z=0..10000 nm.\n'
+        'Copper: 85000 x 85000 nm outer frame, 54000 x 54000 nm opening, z=0..10000 nm.\n'
         'The separate STL files identify materials. The combined STL preserves both solids but has no chemistry labels.\n'
         'Image rows map from positive Y downwards, preserving the template top view.\n'
         'Contours follow the input pixel grid; one pixel is approximately 109.76 nm.\n'

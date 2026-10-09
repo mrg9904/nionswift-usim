@@ -11,11 +11,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 from shapely import union_all
-from shapely.geometry import Polygon, MultiPoint, box
-from shapely.affinity import translate
+from shapely.geometry import Polygon, MultiPoint, box, Point
 import trimesh
 
 from create_lacey_carbon import SAMPLES, STL_SAMPLES, verify
+from nion.usim_device import SampleGeometry
 
 
 def make_prism(side, height, abc, spin):
@@ -54,7 +54,6 @@ def preview(prism, film_region, output):
             draw.polygon(top(ring.coords), fill='white')
     hull = MultiPoint(vertices[:, :2]).convex_hull
     draw.polygon(top(hull.exterior.coords), fill='#f0ab42', outline='black', width=2)
-    draw.line(top(np.vstack((vertices[:6, :2], vertices[0, :2]))), fill='#963715', width=2)
     draw.text((30, 20), 'Top view: gray carbon, white vacuum, orange prism projection', fill='black')
     draw.text((30, 710), f'View width: {2*radius:.1f} nm; film top z=5 nm', fill='black')
     local = vertices - np.r_[center, 5.]
@@ -66,7 +65,9 @@ def preview(prism, film_region, output):
     plane = np.array([[-radius, -radius, 0], [radius, -radius, 0],
                       [radius, radius, 0], [-radius, radius, 0]])
     draw.polygon(iso(plane), fill='#eeeeee', outline='#aaaaaa')
-    facets = [list(range(6)), list(range(6, 12))] + [[i, (i+1)%6, (i+1)%6+6, i+6] for i in range(6)]
+    # Loaded STL vertex order is arbitrary; use actual faces rather than assuming
+    # vertices 0..5 and 6..11 still enumerate the two hexagonal bases.
+    facets = prism.faces.tolist()
     for facet in sorted(facets, key=lambda ids: float(local[ids, 1].mean()), reverse=True):
         draw.polygon(iso(local[facet]), fill='#e6a23b', outline='#5f421a', width=2)
     draw.text((730, 20), '3D view: tilted prism; gray plane marks carbon top z=5 nm', fill='black')
@@ -79,16 +80,19 @@ def generate(seed, output, stl_output):
     abc = rng.integers(1, 101, 3)
     spin = rng.uniform(0., 2*np.pi)
     prism, normal = make_prism(side, height, abc, spin)
-    film_path = STL_SAMPLES/'lacey_carbon_54um_5nm.stl'
-    film = trimesh.load_mesh(film_path, process=True)
+    assembly = trimesh.load_mesh(STL_SAMPLES/'hexagonal_prism_on_lacey_carbon_with_copper_grid.stl', process=True)
+    metadata = json.loads((STL_SAMPLES/'single_cathode.json').read_text(encoding='utf-8'))
+    support = assembly.submesh([np.flatnonzero(~SampleGeometry.cathode_face_mask(assembly, metadata))], append=True)
+    carbon_faces = np.all(support.triangles[:, :, 2] <= 5.00001, axis=1) & np.all(np.abs(support.triangles[:, :, :2]) <= 27000.001, axis=(1, 2))
+    film = support.submesh([np.flatnonzero(carbon_faces)], append=True)
     triangles = film.triangles
     upper = np.all(np.isclose(triangles[:, :, 2], 5., atol=1e-6), axis=1)
     film_region = union_all([Polygon(t[:, :2]) for t in triangles[upper]])
-    footprint = MultiPoint(prism.vertices[:, :2]).convex_hull
-    # Find a site whose entire prism projection rests over carbon, never a hole.
+    contact = prism.vertices[np.argmin(prism.vertices[:, 2]), :2]
+    # Only the lowest point must touch existing carbon; overhang is allowed.
     for _ in range(100000):
         xy = rng.uniform(-26000., 26000., 2)
-        if film_region.covers(translate(footprint, xoff=xy[0], yoff=xy[1])):
+        if film_region.covers(Point(contact+xy)):
             break
     else:
         raise ValueError('No carbon area can accommodate the sampled prism; try another seed')
@@ -102,10 +106,7 @@ def generate(seed, output, stl_output):
     np.testing.assert_allclose(edges[:3], -edges[3:], atol=1e-8)
     np.testing.assert_allclose(prism.vertices[6:]-bottom, np.tile(height*normal, (6, 1)))
     assert np.isclose(prism.bounds[0, 2], 5.)
-    support = trimesh.load_mesh(STL_SAMPLES/'lacey_carbon_with_copper_grid.stl', process=True)
-    models = {'hexagonal_prism.stl': prism,
-              'hexagonal_prism_on_lacey_carbon.stl': trimesh.util.concatenate((film, prism)),
-              'hexagonal_prism_on_lacey_carbon_with_copper_grid.stl': trimesh.util.concatenate((support, prism))}
+    models = {'hexagonal_prism_on_lacey_carbon_with_copper_grid.stl': trimesh.util.concatenate((support, prism))}
     stl_output.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
     info = {'seed': seed, 'coordinate_unit': 'nm', 'side_length_nm': float(side),
@@ -115,9 +116,13 @@ def generate(seed, output, stl_output):
         'spin_about_prism_axis_deg': float(np.degrees(spin)),
         'bottom_face_center_nm': bottom.mean(axis=0).tolist(),
         'contact_points_nm': prism.vertices[np.isclose(prism.vertices[:, 2], 5.)].tolist(),
-        'film_source_sha256': hashlib.sha256(film_path.read_bytes()).hexdigest(),
-        'placement': 'Entire XY projection over carbon; lowest point touches film top z=5 nm. Tilted base is not flush.',
-        'direction_convention': '[abc] is Cartesian in sample XYZ; no CIF/lattice is assigned.', 'models': {}}
+        'film_source_sha256': hashlib.sha256(film.export(file_type='stl')).hexdigest(),
+        'placement': 'Lowest point touches film top z=5 nm; partial XY projection over vacuum is allowed.',
+        'direction_convention': '[abc] is Cartesian in sample XYZ; no CIF/lattice is assigned.',
+        'stl_exports': list(models), 'models': {'hexagonal_prism.stl': {
+            'watertight': True, 'faces': len(prism.faces),
+            'bounds_nm': np.vstack((prism.vertices.astype(np.float32).min(axis=0), prism.vertices.astype(np.float32).max(axis=0))).astype(float).tolist(),
+            'volume_nm3': float(prism.volume)}}}
     for filename, mesh in models.items():
         mesh.export(stl_output/filename)
         loaded = trimesh.load_mesh(stl_output/filename, process=True)

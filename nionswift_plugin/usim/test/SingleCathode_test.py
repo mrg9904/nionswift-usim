@@ -8,6 +8,7 @@ from nion.instrumentation.test import AcquisitionTestContext
 from nion.swift.test import TestContext
 from nion.usim_device import SingleCathodeSample, SimulationSettings, KikuchiModel, EELSCameraSimulator, InstrumentDevice, DeviceConfiguration
 from nionswift_plugin.usim.test import KikuchiModel_test
+from nion.usim_device import HAADFFocusModel
 
 
 class TestSingleCathode(unittest.TestCase):
@@ -19,6 +20,21 @@ class TestSingleCathode(unittest.TestCase):
     def setUp(self):
         self.sample.set_stage_tilt(Geometry.FloatPoint())
 
+    def test_local_contact_allows_vacuum_under_prism_and_grid_is_85um(self):
+        np.testing.assert_allclose(np.ptp(self.sample._mesh.vertices, axis=0), [85000., 85000., 10000.])
+        self.assertEqual(self.sample.model_info['support_generation']['local_cathode_support_added_area_nm2'], 0.)
+        contact = self.sample.model_info['contact_points_nm'][0]
+        lo, hi = self.sample._support.surface_maps(np.array([contact[0]]), np.array([contact[1]]))
+        self.assertAlmostEqual(float(hi[0, 0]-lo[0, 0]), 5.)
+        self.assertAlmostEqual(contact[2], 5.)
+        offset, _ = self.sample.initial_view
+        slo, shi, clo, chi = self.sample._maps(offset, Geometry.FloatSize(800, 800),
+            Geometry.FloatPoint(), Geometry.FloatPoint(), Geometry.IntSize(128, 128))
+        crystal = self.sample._thickness(clo, chi) > 0
+        support = self.sample._thickness(slo, shi) > 0
+        self.assertTrue(np.any(crystal & ~support))
+        self.assertTrue(np.any(crystal & support))
+
     def test_crystal_001_aligns_with_prism_normal_and_stage_tilt_rotates_it(self):
         crystal = KikuchiModel.load_crystal(self.sample.crystal_cif_path)
         axis = crystal.cell_angstrom @ np.array([0., 0., 1.])
@@ -27,6 +43,29 @@ class TestSingleCathode(unittest.TestCase):
         np.testing.assert_allclose(rotation @ axis, self.sample.model_info['base_normal_unit_xyz'], atol=1e-8)
         tilted = KikuchiModel.orientation_matrix(crystal, tx_rad=.1, sample_rotation=self.sample.crystal_rotation)
         self.assertGreater(np.linalg.norm(tilted @ axis-rotation @ axis), .01)
+
+    def test_ronchigram_fov_independence_and_stage_z_focus(self):
+        fixture = KikuchiModel_test.TestKikuchiModel()
+        fixture.sample = self.sample
+        manager, camera, context, area = fixture.make_camera(128)
+        manager.set_value_2d('stage_position_m', self.sample.initial_view[0])
+        manager.set_value('C10Control', 1000e-9)
+        def capture():
+            return camera.get_frame_data(area, Geometry.IntSize(1, 1), .1, context, Geometry.FloatPoint(.5, .5))
+        try:
+            before = capture()
+            context = type(context)(Geometry.IntSize(64, 64), Geometry.FloatPoint(), 85000., 0.)
+            after = capture()
+            np.testing.assert_allclose(before.data, after.data, rtol=1e-6, atol=1e-6)
+            manager.set_value('stage_z_m', 500e-9)
+            shifted = capture()
+            self.assertGreater(np.max(np.abs(shifted.data-after.data)), 1.)
+            self.assertAlmostEqual(manager.get_value('C10Control'), 1000e-9)
+            manager.set_value('stage_z_m', 0.)
+            manager.set_value('C10Control', 500e-9)
+            np.testing.assert_allclose(shifted.data, capture().data, rtol=1e-6, atol=1e-6)
+        finally:
+            camera.close()
 
     def test_material_thickness_excludes_air_gap_and_depth_planes_preserve_it(self):
         position = Geometry.FloatPoint(x=self.sample.center_nm[0]*1e-9, y=self.sample.center_nm[1]*1e-9)
@@ -90,6 +129,14 @@ class TestSingleCathode(unittest.TestCase):
                 self.assertEqual(parameters.center_nm, Geometry.FloatPoint())
             position = -np.array([stage.x, stage.y])*1e9
             np.testing.assert_allclose(position, generator.sample.center_nm[:2])
+            context.instrument.SetVal('C10', 1000e-9)
+            context.instrument.SetVal('stage_z_m', 500e-9)
+            with mock.patch.object(HAADFFocusModel, 'apply_depth_planes_defocus',
+                                   wraps=HAADFFocusModel.apply_depth_planes_defocus) as focus:
+                generator.generate_scan_data(context.instrument,
+                    ScanDevice.ScanFrameParameters(pixel_size=(64, 64), fov_nm=800., pixel_time_us=1.))
+                self.assertAlmostEqual(focus.call_args.kwargs['defocus_m'], 500e-9)
+            self.assertAlmostEqual(context.instrument.GetVal('C10'), 1000e-9)
         setup = None
 
     def test_stage_tilt_changes_shape_conserves_volume_and_updates_camera_geometry(self):

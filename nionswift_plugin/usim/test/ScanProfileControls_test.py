@@ -26,6 +26,8 @@ class TestScanProfileControls(unittest.TestCase):
         with AcquisitionTestContext.AcquisitionTestContext(DeviceConfiguration.AcquisitionContextConfiguration()) as context:
             source = context.scan_hardware_source
             controller = ScanControlPanel.ScanPanelController(context.document_controller, source)
+            self.assertNotIn('@binding(_model.fov_label_color)', str(controller.ui_view))
+            self.assertNotIn('@binding(_model.fov_label_tool_tip)', str(controller.ui_view))
             widget = Declarative.DeclarativeWidget(context.document_controller.ui, context.document_controller.event_loop, controller)
             try:
                 tone = controller._usim_tone

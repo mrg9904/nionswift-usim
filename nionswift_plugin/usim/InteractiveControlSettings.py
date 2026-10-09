@@ -46,7 +46,7 @@ STAGE_Y_DIRECTION = 1.0
 
 ENABLE_KEYBOARD_CONTROLS = True
 
-# Ctrl selects coarse steps; Ctrl+Shift selects fine steps.
+# For tilt/FoV, Ctrl selects coarse steps; Ctrl+Shift selects fine steps.
 COARSE_STEP_MULTIPLIER = 10.0
 FINE_STEP_MULTIPLIER = 0.1
 
@@ -69,7 +69,7 @@ MINIMUM_FOV_NM = 5.0
 # HAADF focus model. A 1 nm change is usually too small to see, so use 10 nm.
 DEFOCUS_STEP_NM = 10.0
 
-# Arrow keys: Up TY+, Down TY-, Left TX-, Right TX+.
+# Arrow keys: Up TX+, Down TX-, Left TY-, Right TY+.
 TILT_STEP_DEG = 0.1
 
 # B controls brightness; C controls contrast. Shift reverses either key.

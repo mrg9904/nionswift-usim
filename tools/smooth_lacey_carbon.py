@@ -75,10 +75,10 @@ def generate(output, sigma=.4, stl_output=STL_SAMPLES):
     output.mkdir(parents=True, exist_ok=True)
     stl_output.mkdir(parents=True, exist_ok=True)
     models = {'lacey_carbon_54um_5nm.stl': (carbon, carbon_area*5),
-              'copper_grid_100um_10um.stl': (copper, (100000.**2-54000.**2)*10000),
-              'lacey_carbon_with_copper_grid.stl': (combined, carbon_area*5+(100000.**2-54000.**2)*10000)}
+              'copper_grid_85um_10um.stl': (copper, (85000.**2-54000.**2)*10000),
+              'lacey_carbon_with_copper_grid.stl': (combined, carbon_area*5+(85000.**2-54000.**2)*10000)}
     info = {'coordinate_unit': 'nm', 'carbon_size_nm': [54000, 54000, 5],
-            'copper_outer_size_nm': [100000, 100000, 10000], 'copper_opening_size_nm': [54000, 54000],
+            'copper_outer_size_nm': [85000, 85000, 10000], 'copper_opening_size_nm': [54000, 54000],
             'smoothing_sigma_source_pixels': sigma, 'smoothing_scale_nm': sigma*54000/gray.shape[0],
             'contour_upsampling': 4, 'dark_threshold_inclusive': threshold,
             'diagonal_contact_pixels_filled': repaired, 'carbon_components': len(polygons), 'enclosed_holes': holes,
@@ -97,8 +97,8 @@ def generate(output, sigma=.4, stl_output=STL_SAMPLES):
     preview = Image.new('RGB', (1100, 1180), 'white')
     drawing = ImageDraw.Draw(preview)
     drawing.rectangle((50, 50, 1050, 1050), fill='#b77942')
-    preview.paste(film.resize((540, 540), Image.Resampling.LANCZOS).convert('RGB'), (280, 280))
-    drawing.text((50, 1080), 'Smooth lacey carbon: 54 x 54 um, 5 nm thick; copper frame: 100 x 100 um, 10 um thick', fill='black')
+    preview.paste(film.resize((635, 635), Image.Resampling.LANCZOS).convert('RGB'), (232, 232))
+    drawing.text((50, 1080), 'Smooth lacey carbon: 54 x 54 um, 5 nm thick; copper frame: 85 x 85 um, 10 um thick', fill='black')
     preview.save(output/'lacey_carbon_grid_top_view.png')
     original = Image.open(SAMPLES/'lacey_carbon_grid'/'carbon_binary_mask.png').convert('L')
     old_crop = original.crop((100, 100, 220, 220)).resize((600, 600), Image.Resampling.NEAREST)

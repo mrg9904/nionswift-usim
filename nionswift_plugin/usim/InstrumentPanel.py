@@ -153,6 +153,15 @@ class InstrumentWidget(Widgets.CompositeWidgetBase):
         beam_current_field.bind_text(ControlBinding(value_manager, "BeamCurrent", converter=Converter.PhysicalValueToStringConverter(units="pA", multiplier=1E12)))
 
         stage_position_widget = PositionWidget(ui, _("Stage"), value_manager, "stage_position_m")
+        stage_z_field = ui.create_line_edit_widget()
+        stage_z_field.bind_text(ControlBinding(value_manager, "stage_z_m",
+            converter=Converter.PhysicalValueToStringConverter(units="nm", multiplier=1E9)))
+        stage_z_row = ui.create_row_widget()
+        stage_z_row.add_spacing(8)
+        stage_z_row.add(ui.create_label_widget("Stage Z"))
+        stage_z_row.add_spacing(8)
+        stage_z_row.add(stage_z_field)
+        stage_z_row.add_stretch()
         stage_tilt_widget = PositionWidget(ui, _("Stage tilt"), value_manager, "stage_tilt_rad",
             unit="deg", multiplier=180/math.pi, axis_labels=("TX", "TY"))
 
@@ -260,6 +269,7 @@ class InstrumentWidget(Widgets.CompositeWidgetBase):
         column_widget.add(voltage_row)
         column_widget.add(beam_current_row)
         column_widget.add(stage_position_widget)
+        column_widget.add(stage_z_row)
         column_widget.add(stage_tilt_widget)
         column_widget.add(beam_shift_widget)
         column_widget.add(defocus_row)

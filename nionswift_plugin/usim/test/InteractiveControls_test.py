@@ -110,12 +110,12 @@ class TestInteractiveControls(unittest.TestCase):
             self.manager.set_value_2d('stage_tilt_rad', Geometry.FloatPoint())
             baseline = self.capture()
             self.assertTrue(self.controls.handle_key_pressed(panel, self.key('right')))
-            self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').x, math.radians(.1))
-            self.assertEqual(self.manager.get_value_2d('stage_tilt_rad').y, 0)
+            self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').y, math.radians(.1))
+            self.assertEqual(self.manager.get_value_2d('stage_tilt_rad').x, 0)
             tilted = self.capture()
             self.assertGreater(np.max(np.abs(tilted.data-baseline.data)), 1)
             self.assertTrue(self.controls.handle_key_pressed(panel, self.key('up')))
-            self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').y, math.radians(.1))
+            self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').x, math.radians(.1))
             self.assertTrue(self.controls.handle_key_pressed(panel, self.key('left')))
             self.assertTrue(self.controls.handle_key_pressed(panel, self.key('down')))
             self.assertEqual(self.manager.get_value_2d('stage_tilt_rad'), Geometry.FloatPoint())
@@ -129,12 +129,11 @@ class TestInteractiveControls(unittest.TestCase):
             panel = self.panel(source)
             for shift, multiplier in ((False, 10.), (True, .1)):
                 initial_focus = self.manager.get_value('C10')
-                self.assertTrue(self.controls.handle_key_pressed(panel, self.key('f', shift=shift, control=True)))
-                self.assertAlmostEqual(self.manager.get_value('C10'), initial_focus+10e-9*multiplier)
-                self.assertTrue(self.controls.handle_key_pressed(panel, self.key('d', shift=shift, control=True)))
+                self.assertFalse(self.controls.handle_key_pressed(panel, self.key('f', shift=shift, control=True)))
+                self.assertFalse(self.controls.handle_key_pressed(panel, self.key('d', shift=shift, control=True)))
                 self.assertAlmostEqual(self.manager.get_value('C10'), initial_focus)
                 self.manager.set_value_2d('stage_tilt_rad', Geometry.FloatPoint())
-                for direction, axis, sign in (('up', 'y', 1), ('down', 'y', -1), ('left', 'x', -1), ('right', 'x', 1)):
+                for direction, axis, sign in (('up', 'x', 1), ('down', 'x', -1), ('left', 'y', -1), ('right', 'y', 1)):
                     before = self.manager.get_value_2d('stage_tilt_rad')
                     self.assertTrue(self.controls.handle_key_pressed(panel, self.key(direction, shift=shift, control=True)))
                     after = self.manager.get_value_2d('stage_tilt_rad')
@@ -151,8 +150,8 @@ class TestInteractiveControls(unittest.TestCase):
                 return ord('F')
         key = PhysicalKey('\x06', 'f', CanvasItem.KeyboardModifiers(control=True))
         before = self.manager.get_value('C10')
-        self.assertTrue(self.controls.handle_key_pressed(self.panel('usim_scan'), key))
-        self.assertAlmostEqual(self.manager.get_value('C10'), before+100e-9)
+        self.assertFalse(self.controls.handle_key_pressed(self.panel('usim_scan'), key))
+        self.assertAlmostEqual(self.manager.get_value('C10'), before)
         self.assertFalse(self.controls.handle_key_pressed(self.panel('usim_eels_camera'), key))
 
     def test_ronchigram_double_click_uses_aberration_mapping_and_defocus_sign(self):

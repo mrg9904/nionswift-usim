@@ -341,7 +341,7 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
     depends_on = ["C10Control", "C12Control", "C21Control", "C23Control", "C30Control", "C32Control", "C34Control",
                   "C34Control", "stage_position_m", "probe_state", "probe_position", "features",
                   "beam_shift_m", "is_blanked", "BeamCurrent", "CAperture", "ApertureRound", "S_VOA", "S_MOA",
-                  "ConvergenceAngle", "stage_tilt_rad", "EHT"]
+                  "ConvergenceAngle", "stage_tilt_rad", "stage_z_m", "EHT"]
 
     def __init__(self, instrument: InstrumentDevice_.Instrument, ronchigram_shape: Geometry.IntSize, counts_per_electron: int, stage_size_nm: float) -> None:
         super().__init__(instrument, "ronchigram", ronchigram_shape, counts_per_electron)
@@ -572,6 +572,13 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             thickness_param = 100
             value_manager = typing.cast(InstrumentDevice_.ValueManager, self.instrument.value_manager)
             metadata = {}
+            effective_defocus = self.instrument.GetVal("C10Control") - self.instrument.GetVal("stage_z_m")
+            # Scan FoV defines a probe's physical position, not the camera's
+            # angular field or specimen magnification. Only its actual offset
+            # enters the source extent and aberration mapping.
+            scan_offset = EELSModel.probe_sample_position(Geometry.FloatPoint(),
+                scan_context.fov_size_nm or Geometry.FloatSize(), scan_context.center_nm or Geometry.FloatPoint(),
+                frame_settings.current_probe_position or Geometry.FloatPoint(.5, .5), scan_context.rotation_rad)
             # Large support films must not be clipped to the historical 1 um
             # source. Enclose ray displacements, with headroom for aberrations;
             # powers of two retain the projection cache across small focus steps.
@@ -579,9 +586,8 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             if isinstance(sample, LaceyCarbonSample.LaceyCarbonSample):
                 half_angle = self._tv_pixel_angle * self._sensor_dimensions.height / 2
                 beam = self.instrument.GetVal2D("beam_shift_m")
-                probe_extent = max(tuple(scan_context.fov_size_nm or Geometry.FloatSize()))
-                required = (4 * abs(self.instrument.GetVal("C10Control")) * half_angle * 1e9
-                            + 2 * max(abs(beam.x), abs(beam.y)) * 1e9 + probe_extent)
+                required = (4 * abs(effective_defocus) * half_angle * 1e9
+                            + 2 * max(abs(beam.x+scan_offset.x), abs(beam.y+scan_offset.y)) * 1e9)
                 self.__source_fov_nm *= 2 ** max(0, math.ceil(math.log2(max(required / self.__stage_size_nm, 1))))
             if not value_manager.is_blanked:
                 data = self._source_image(readout_area, binning_shape)
@@ -590,14 +596,6 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                                     readout_area.width//binning_shape.width), numpy.float32)
 
             if not value_manager.is_blanked:
-                scan_offset = Geometry.FloatPoint()
-                scan_context_fov_nm = scan_context.fov_size_nm
-                if frame_settings.current_probe_position is not None and scan_context_fov_nm is not None:
-                    scan_offset = Geometry.FloatPoint(
-                        y=frame_settings.current_probe_position[0] * scan_context_fov_nm[0] - scan_context_fov_nm[0] / 2,
-                        x=frame_settings.current_probe_position[1] * scan_context_fov_nm[1] - scan_context_fov_nm[1] / 2)
-                    scan_offset = scan_offset*1e-9
-
                 theta = self._tv_pixel_angle * self._sensor_dimensions.height / 2  # half angle on camera
                 aberrations: typing.Dict[str, typing.Union[float, int]] = dict()
                 aberrations["height"] = data.shape[0]
@@ -606,7 +604,7 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                 aberrations["source_scale"] = self.__source_fov_nm / self.__stage_size_nm
                 aberrations["c0a"] = self.instrument.GetVal2D("beam_shift_m").x + scan_offset[1]
                 aberrations["c0b"] = self.instrument.GetVal2D("beam_shift_m").y + scan_offset[0]
-                aberrations["c10"] = self.instrument.GetVal("C10Control")
+                aberrations["c10"] = effective_defocus
                 aberrations["c12a"] = self.instrument.GetVal2D("C12Control").x
                 aberrations["c12b"] = self.instrument.GetVal2D("C12Control").y
                 aberrations["c21a"] = self.instrument.GetVal2D("C21Control").x

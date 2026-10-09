@@ -8,7 +8,7 @@ R / E
     Decrease / increase the current scan field of view.
 D / F
     Decrease / increase the instrument defocus.
-Arrow keys (Up/Down: TY +/-; Left/Right: TX -/+)
+Arrow keys (Up/Down: TX +/-; Left/Right: TY -/+)
     Increase stage TX / TY by the configured degree step.
 B / C (Shift reverses direction)
     Increase selected-profile display brightness / contrast.
@@ -308,8 +308,8 @@ class InteractiveControlManager:
             if channel is not None:
                 channel.brightness, channel.contrast = brightness, contrast
             return True
-        tilt_x_direction = int(key.is_right_arrow) - int(key.is_left_arrow)
-        tilt_y_direction = int(key.is_up_arrow) - int(key.is_down_arrow)
+        tilt_x_direction = int(key.is_up_arrow) - int(key.is_down_arrow)
+        tilt_y_direction = int(key.is_right_arrow) - int(key.is_left_arrow)
         if (tilt_x_direction or tilt_y_direction) and (not modifiers.shift or modifiers.control):
             tilt = self.__instrument.get_value_2d("stage_tilt_rad")
             delta = math.radians(InteractiveControlSettings.TILT_STEP_DEG) * step_multiplier
@@ -320,11 +320,15 @@ class InteractiveControlManager:
             return False
 
         if key_text == InteractiveControlSettings.DEFOCUS_DECREASE_KEY:
+            if modifiers.control:
+                return False
             return self.__change_defocus(
                 -InteractiveControlSettings.DEFOCUS_STEP_NM * step_multiplier
             )
 
         if key_text == InteractiveControlSettings.DEFOCUS_INCREASE_KEY:
+            if modifiers.control:
+                return False
             return self.__change_defocus(
                 InteractiveControlSettings.DEFOCUS_STEP_NM * step_multiplier
             )

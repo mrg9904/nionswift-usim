@@ -138,6 +138,19 @@ def run():
         original_init(controller, document_controller, source)
         if not source.hardware_source_id.startswith('usim_'):
             return
+        def remove_simulator_fov_warning(view):
+            if isinstance(view, dict):
+                for name, value in list(view.items()):
+                    if value == '@binding(_model.fov_label_color)':
+                        view[name] = 'black'
+                    elif value == '@binding(_model.fov_label_tool_tip)':
+                        view[name] = 'Simulated scan field of view; no hardware maximum.'
+                    else:
+                        remove_simulator_fov_warning(value)
+            elif isinstance(view, list):
+                for child in view:
+                    remove_simulator_fov_warning(child)
+        remove_simulator_fov_warning(controller.ui_view)
         controller._usim_tone = ToneModel(document_controller, source)
         _models.add(controller._usim_tone)
         u = Declarative.DeclarativeUI()

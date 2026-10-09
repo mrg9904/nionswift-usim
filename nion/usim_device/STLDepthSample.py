@@ -31,7 +31,8 @@ class STLDepthSample(SampleSimulator.Sample):
     """
 
     def __init__(self, stage_size_nm: float, *, file_name: typing.Optional[str] = None,
-                 shift_nm: typing.Optional[typing.Tuple[float, float]] = None) -> None:
+                 shift_nm: typing.Optional[typing.Tuple[float, float]] = None,
+                 mesh_filter: typing.Optional[typing.Callable[[trimesh.Trimesh], trimesh.Trimesh]] = None) -> None:
         # Keep the standard uSim sample constructor interface.
         _ = stage_size_nm
 
@@ -59,6 +60,9 @@ class STLDepthSample(SampleSimulator.Sample):
             raise RuntimeError(
                 f"The STL did not load as a triangle mesh: {stl_path}"
             )
+
+        if mesh_filter is not None:
+            mesh = mesh_filter(mesh)
 
         if not mesh.is_watertight:
             raise RuntimeError(

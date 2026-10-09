@@ -4,13 +4,22 @@ The combined STL is in nm. Its 54 um opening identifies carbon versus copper;
 material parameters are phenomenological, as in the existing EELS simulator.
 """
 import numpy as np
+import json
+from pathlib import Path
+from nion.usim_device import SampleGeometry
 from nion.usim_device import EELSModel, HAADFFocusModel, STLDepthSample, SimulationSettings
 from nion.utils import Geometry
 
 
 class LaceyCarbonSample(STLDepthSample.STLDepthSample):
     def __init__(self, stage_size_nm):
-        super().__init__(stage_size_nm, file_name="lacey_carbon_with_copper_grid.stl", shift_nm=(0., 0.))
+        root = Path(__file__).with_name('samples')
+        metadata = json.loads((root/'single_cathode.json').read_text(encoding='utf-8'))
+        def support_only(mesh):
+            faces = np.flatnonzero(~SampleGeometry.cathode_face_mask(mesh, metadata))
+            return mesh.submesh([faces], append=True)
+        super().__init__(stage_size_nm, file_name="hexagonal_prism_on_lacey_carbon_with_copper_grid.stl",
+                         shift_nm=(0., 0.), mesh_filter=support_only)
 
     @property
     def title(self):

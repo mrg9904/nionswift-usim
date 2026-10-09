@@ -3,6 +3,17 @@ import math
 import numpy as np
 
 
+def cathode_face_mask(mesh, metadata):
+    """Identify the crystal in the complete STL using its recorded bounds."""
+    bounds = np.asarray(metadata['models']['hexagonal_prism.stl']['bounds_nm'])
+    triangles = mesh.triangles
+    mask = (np.all((triangles >= bounds[0]-1e-3) & (triangles <= bounds[1]+1e-3), axis=(1, 2))
+            & (triangles[:, :, 2].max(axis=1) > 5.001))
+    if np.count_nonzero(mask) != metadata['models']['hexagonal_prism.stl']['faces']:
+        raise ValueError('Complete STL does not match recorded cathode geometry')
+    return mask
+
+
 def stage_rotation(tilt):
     if not np.isfinite([tilt.x, tilt.y]).all():
         raise ValueError('Stage tilt must be finite')

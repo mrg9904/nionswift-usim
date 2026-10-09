@@ -7,7 +7,6 @@ import json
 import logging
 from pathlib import Path
 import numpy as np
-import trimesh
 from nion.utils import Geometry
 from nion.usim_device import EELSModel, HAADFFocusModel, LaceyCarbonSample, STLDepthSample, SurfaceRasterizer
 from nion.usim_device import SampleGeometry
@@ -21,18 +20,10 @@ class SingleCathodeSample(LaceyCarbonSample.LaceyCarbonSample):
         self.model_info = json.loads((root/'single_cathode.json').read_text(encoding='utf-8'))
         STLDepthSample.STLDepthSample.__init__(self, stage_size_nm,
             file_name='hexagonal_prism_on_lacey_carbon_with_copper_grid.stl', shift_nm=(0., 0.))
-        prism = trimesh.load_mesh(root/'hexagonal_prism.stl', process=True)
-        # Both files use identical float32 STL coordinates. Identify all prism
-        # faces in the combined mesh, leaving only carbon/copper support faces.
-        def rows(vertices):
-            return np.ascontiguousarray(vertices, dtype=np.float64).view(np.dtype((np.void, 24))).ravel()
-        crystal_vertices = np.isin(rows(self._mesh.vertices), rows(prism.vertices))
-        crystal_faces = crystal_vertices[self._mesh.faces].all(axis=1)
-        if np.count_nonzero(crystal_faces) != len(prism.faces):
-            raise ValueError('Combined STL does not match the separately recorded cathode prism')
+        crystal_faces = SampleGeometry.cathode_face_mask(self._mesh, self.model_info)
         self._support_triangles = self._mesh.triangles[~crystal_faces].copy()
         self._crystal_triangles = self._mesh.triangles[crystal_faces].copy()
-        self.center_nm = prism.vertices.mean(axis=0)
+        self.center_nm = np.unique(self._crystal_triangles.reshape(-1, 3), axis=0).mean(axis=0)
         self._support = TiltedSurfaceRasterizer.TiltedSurfaceRasterizer(self._support_triangles, self.center_nm)
         self._crystal = TiltedSurfaceRasterizer.TiltedSurfaceRasterizer(self._crystal_triangles, self.center_nm)
         self.crystal_cif_path = str(root/'NNMTO_pristine.cif')

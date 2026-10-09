@@ -1,0 +1,55 @@
+{
+  "seed": 20261009,
+  "method": "rounded random Voronoi pores; calibrated to 10 um exemplar",
+  "coordinate_unit": "nm",
+  "template_size_nm": [
+    10000,
+    10000
+  ],
+  "template_sha256": "fa9c33b4a5e02388c122845464ba4b0f2b70aee68f3e2ffe0b9469d1db084bf7",
+  "carbon_size_nm": [
+    54000,
+    54000,
+    5
+  ],
+  "carbon_components": 1,
+  "enclosed_holes": 3898,
+  "source_carbon_area_fraction": 0.2299391896357988,
+  "carbon_area_fraction": 0.23013317551671575,
+  "nominal_strut_width_nm": 65.43440246582031,
+  "source_median_pore_diameter_nm": 699.7852706414948,
+  "generated_median_pore_diameter_nm": 794.7994189252923,
+  "local_cathode_support_added_area_nm2": 0.0,
+  "cathode_translation_xy_nm": [
+    9.770085580385057e-05,
+    -0.00028814582401537336
+  ],
+  "copper_outer_size_nm": [
+    85000,
+    85000,
+    10000
+  ],
+  "copper_opening_size_nm": [
+    54000,
+    54000
+  ],
+  "parts": {
+    "hexagonal_prism_on_lacey_carbon_with_copper_grid.stl": {
+      "faces": 581528,
+      "watertight": true,
+      "bounds_nm": [
+        [
+          -42500.0,
+          -42500.0,
+          0.0
+        ],
+        [
+          42500.0,
+          42500.0,
+          10000.0
+        ]
+      ],
+      "volume_nm3": 43093368016139.375
+    }
+  }
+}

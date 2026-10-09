@@ -21,41 +21,41 @@
   "tilt_from_film_normal_deg": 46.37810027350329,
   "spin_about_prism_axis_deg": 260.9092850212669,
   "bottom_face_center_nm": [
-    123.3029496121053,
-    -8769.917813260385,
+    228.58292087930442,
+    -9080.416465446016,
     111.53251337468801
   ],
   "contact_points_nm": [
     [
-      199.89140484443206,
-      -8699.232197931009,
+      305.1713623492933,
+      -9009.730756895824,
       5.0
     ]
   ],
-  "film_source_sha256": "7b44609bf612aac8306bb64f819a1b783b941e64e1fbf143b29c42988f753c94",
-  "placement": "Entire XY projection over carbon; lowest point touches film top z=5 nm. Tilted base is not flush.",
+  "film_source_sha256": "24d17a9a7654d27e4962d3cc21841f829d7e9ac6d4aa7bcb2e1cf17f15260c8c",
+  "placement": "Lowest prism vertex touches unmodified carbon at z=5 nm; partial projection over vacuum is allowed.",
   "direction_convention": "[abc] is Cartesian in sample XYZ; no CIF/lattice is assigned.",
   "models": {
     "hexagonal_prism.stl": {
-      "watertight": true,
       "faces": 20,
+      "watertight": true,
       "bounds_nm": [
         [
-          -12.437880516052246,
-          -8888.595703125,
+          92.84209442138672,
+          -9199.09375,
           5.0
         ],
         [
-          348.4980163574219,
-          -8519.796875,
+          453.7779846191406,
+          -8830.294921875,
           369.5895690917969
         ]
       ],
-      "volume_nm3": 12674394.908063313
+      "volume_nm3": 12674394.995792339
     },
     "hexagonal_prism_on_lacey_carbon.stl": {
+      "faces": 581496,
       "watertight": true,
-      "faces": 143124,
       "bounds_nm": [
         [
           -27000.0,
@@ -68,24 +68,45 @@
           369.5895690917969
         ]
       ],
-      "volume_nm3": 3370059884.605868
+      "volume_nm3": 3368016139.4993377
     },
     "hexagonal_prism_on_lacey_carbon_with_copper_grid.stl": {
+      "faces": 581528,
       "watertight": true,
-      "faces": 143156,
       "bounds_nm": [
         [
-          -50000.0,
-          -50000.0,
+          -42500.0,
+          -42500.0,
           0.0
         ],
         [
-          50000.0,
-          50000.0,
+          42500.0,
+          42500.0,
           10000.0
         ]
       ],
-      "volume_nm3": 70843370059884.61
+      "volume_nm3": 43093368016139.375
     }
-  }
+  },
+  "support_generation": {
+    "seed": 20261009,
+    "method": "rounded random Voronoi pores; calibrated to 10 um exemplar",
+    "template_size_nm": [
+      10000,
+      10000
+    ],
+    "local_cathode_support_added_area_nm2": 0.0,
+    "cathode_translation_xy_nm": [
+      9.770085580385057e-05,
+      -0.00028814582401537336
+    ],
+    "copper_outer_size_nm": [
+      85000,
+      85000,
+      10000
+    ]
+  },
+  "stl_exports": [
+    "hexagonal_prism_on_lacey_carbon_with_copper_grid.stl"
+  ]
 }
