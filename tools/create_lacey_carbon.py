@@ -13,6 +13,7 @@ import trimesh
 
 
 SAMPLES = Path(__file__).resolve().parent / 'samples'
+STL_SAMPLES = Path(__file__).resolve().parents[1] / 'nion' / 'usim_device' / 'samples'
 
 
 def otsu_threshold(gray):
@@ -93,11 +94,12 @@ def verify(mesh, expected_volume):
         raise ValueError(f'Incorrect volume: {mesh.volume} != {expected_volume}')
 
 
-def generate(template, output, threshold=None):
+def generate(template, output, threshold=None, stl_output=STL_SAMPLES):
     gray = np.asarray(Image.open(template).convert('L'))
     threshold = otsu_threshold(gray) if threshold is None else threshold
     mask, repaired = resolve_diagonal_contacts(gray <= threshold, gray)
     output.mkdir(parents=True, exist_ok=True)
+    stl_output.mkdir(parents=True, exist_ok=True)
     carbon = extrude_mask(mask)
     copper = copper_frame()
     carbon_volume = float(mask.sum())*(54000.**2/mask.size)*5
@@ -105,9 +107,9 @@ def generate(template, output, threshold=None):
     verify(carbon, carbon_volume)
     verify(copper, copper_volume)
     combined = trimesh.util.concatenate((carbon, copper))
-    meshes = {'lacey_carbon_54um_5nm.stl': (carbon, carbon_volume),
+    meshes = {'lacey_carbon_54um_5nm_pixelated.stl': (carbon, carbon_volume),
               'copper_grid_100um_10um.stl': (copper, copper_volume),
-              'lacey_carbon_with_copper_grid.stl': (combined, carbon_volume+copper_volume)}
+              'lacey_carbon_with_copper_grid_pixelated.stl': (combined, carbon_volume+copper_volume)}
     info = {'coordinate_unit': 'nm', 'origin': 'XY centre; both solids start at z=0',
             'template': template.name, 'template_sha256': hashlib.sha256(template.read_bytes()).hexdigest(),
             'template_shape_px': list(gray.shape), 'dark_threshold_inclusive': threshold,
@@ -116,7 +118,7 @@ def generate(template, output, threshold=None):
             'copper_outer_size_nm': [100000, 100000, 10000], 'copper_opening_size_nm': [54000, 54000],
             'copper_frame_width_nm': 23000, 'parts': {}}
     for filename, (mesh, volume) in meshes.items():
-        path = output/filename
+        path = stl_output/filename
         mesh.export(path, file_type='stl')
         loaded = trimesh.load_mesh(path, process=True)
         verify(loaded, volume)
@@ -134,6 +136,7 @@ def generate(template, output, threshold=None):
     (output/'model_info.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
     (output/'README.txt').write_text(
         'All STL coordinates are in nanometres (STL has no embedded unit or material).\n'
+        f'STL storage directory: {stl_output.resolve()}\n'
         'Carbon: 54000 x 54000 nm footprint, z=0..5 nm, dark template regions only.\n'
         'Copper: 100000 x 100000 nm outer frame, 54000 x 54000 nm opening, z=0..10000 nm.\n'
         'The separate STL files identify materials. The combined STL preserves both solids but has no chemistry labels.\n'
@@ -148,5 +151,6 @@ if __name__ == '__main__':
     parser.add_argument('--template', type=Path, default=SAMPLES/'Carbon_film_mask.jpg')
     parser.add_argument('--output', type=Path, default=SAMPLES/'lacey_carbon_grid')
     parser.add_argument('--threshold', type=int)
+    parser.add_argument('--stl-output', type=Path, default=STL_SAMPLES)
     args = parser.parse_args()
-    generate(args.template, args.output, args.threshold)
+    generate(args.template, args.output, args.threshold, args.stl_output)

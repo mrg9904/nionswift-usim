@@ -27,7 +27,7 @@
   ],
   "copper_frame_width_nm": 23000,
   "parts": {
-    "lacey_carbon_54um_5nm.stl": {
+    "lacey_carbon_54um_5nm_pixelated.stl": {
       "faces": 267644,
       "bounds_nm": [
         [
@@ -61,7 +61,7 @@
       "volume_nm3": 70840000000000.0,
       "watertight": true
     },
-    "lacey_carbon_with_copper_grid.stl": {
+    "lacey_carbon_with_copper_grid_pixelated.stl": {
       "faces": 267676,
       "bounds_nm": [
         [

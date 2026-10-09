@@ -15,7 +15,7 @@ from scipy.ndimage import distance_transform_edt, gaussian_filter, label, zoom
 from shapely.geometry import Polygon, box
 from shapely.geometry.polygon import orient
 import trimesh
-from create_lacey_carbon import SAMPLES, copper_frame, otsu_threshold, resolve_diagonal_contacts, verify
+from create_lacey_carbon import SAMPLES, STL_SAMPLES, copper_frame, otsu_threshold, resolve_diagonal_contacts, verify
 
 
 def smooth_polygons(mask, sigma=.4, upsample=4):
@@ -58,7 +58,7 @@ def rasterize(polygons, size=1968):
     return image
 
 
-def generate(output, sigma=.4):
+def generate(output, sigma=.4, stl_output=STL_SAMPLES):
     gray = np.asarray(Image.open(SAMPLES/'Carbon_film_mask.jpg').convert('L'))
     threshold = otsu_threshold(gray)
     mask, repaired = resolve_diagonal_contacts(gray <= threshold, gray)
@@ -73,6 +73,7 @@ def generate(output, sigma=.4):
     copper = copper_frame()
     combined = trimesh.util.concatenate((carbon, copper))
     output.mkdir(parents=True, exist_ok=True)
+    stl_output.mkdir(parents=True, exist_ok=True)
     models = {'lacey_carbon_54um_5nm.stl': (carbon, carbon_area*5),
               'copper_grid_100um_10um.stl': (copper, (100000.**2-54000.**2)*10000),
               'lacey_carbon_with_copper_grid.stl': (combined, carbon_area*5+(100000.**2-54000.**2)*10000)}
@@ -86,8 +87,8 @@ def generate(output, sigma=.4):
             'area_change_percent': 100*(carbon_area/(mask.mean()*54000.**2)-1), 'parts': {}}
     for filename, (mesh, volume) in models.items():
         verify(mesh, volume)
-        mesh.export(output/filename)
-        loaded = trimesh.load_mesh(output/filename)
+        mesh.export(stl_output/filename)
+        loaded = trimesh.load_mesh(stl_output/filename)
         verify(loaded, volume)
         info['parts'][filename] = {'faces': len(loaded.faces), 'watertight': bool(loaded.is_watertight),
                                   'bounds_nm': loaded.bounds.tolist(), 'volume_nm3': float(loaded.volume)}
@@ -110,6 +111,7 @@ def generate(output, sigma=.4):
     compare.save(output/'edge_smoothing_comparison.png')
     (output/'model_info.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
     (output/'README.txt').write_text('STL units: nm. Carbon z=0..5 nm; copper z=0..10000 nm.\n'
+        f'STL storage directory: {stl_output.resolve()}\n'
         'Smoothed signed-distance contours use subpixel coordinates, not voxel steps.\n'
         'Carbon components and enclosed hole counts are checked against the original.\n'
         'STL contains no material labels; separate files identify carbon and copper.\n', encoding='utf-8')
@@ -120,5 +122,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=SAMPLES/'lacey_carbon_grid_smooth')
     parser.add_argument('--sigma', type=float, default=.4)
+    parser.add_argument('--stl-output', type=Path, default=STL_SAMPLES)
     args = parser.parse_args()
-    generate(args.output, args.sigma)
+    generate(args.output, args.sigma, args.stl_output)

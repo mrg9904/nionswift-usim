@@ -1,4 +1,6 @@
 All STL coordinates are in nanometres (STL has no embedded unit or material).
+STL files are stored in nion/usim_device/samples/ relative to the repository root.
+Original carbon and combined models use the _pixelated.stl suffix.
 Carbon: 54000 x 54000 nm footprint, z=0..5 nm, dark template regions only.
 Copper: 100000 x 100000 nm outer frame, 54000 x 54000 nm opening, z=0..10000 nm.
 The separate STL files identify materials. The combined STL preserves both solids but has no chemistry labels.

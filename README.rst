@@ -393,6 +393,14 @@ Re-selecting the already active sample does not reset a manually adjusted view.
 LaceyCarbon support film
 ------------------------
 
+All STL models are stored in ``nion/usim_device/samples/``: particle models,
+the smooth LaceyCarbon combined model and separate carbon/copper solids, and
+the original carbon/combined models with a ``_pixelated`` suffix. Duplicate
+STLs in ``tools/samples/`` have been removed. That directory holds only source
+images, previews and model metadata. Both mesh generators write STLs to the
+shared directory by default; ``--output`` selects the preview/metadata directory
+and ``--stl-output`` optionally selects another mesh export directory.
+
 Select **LaceyCarbon** in the instrument sample menu after restarting uSim.
 The packaged smooth combined STL contains a 54 x 54 um perforated amorphous
 carbon film (5 nm thick) inside a 100 x 100 um copper frame (10 um thick,
