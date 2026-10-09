@@ -3,6 +3,7 @@ from __future__ import annotations
 # standard libraries
 import typing
 import math
+import logging
 import numpy
 import numpy.typing
 import scipy.ndimage
@@ -14,6 +15,11 @@ from nion.device_kit import InstrumentDevice
 from nion.instrumentation import stem_controller
 from nion.usim_device import CameraSimulator
 from nion.usim_device import Noise
+from nion.usim_device import EELSModel
+from nion.usim_device import KikuchiModel
+from nion.usim_device import RonchigramContrast
+from nion.usim_device import SampleSimulator
+from nion.usim_device import SimulationSettings
 from nion.usim_device import InstrumentDevice as InstrumentDevice_
 from nion.utils import Geometry
 
@@ -44,6 +50,8 @@ class AberrationsController:
         self.__coefficients["c10"] = defocus
         self.__chi: typing.Optional[_NDArray] = None
         self.__c: typing.Optional[typing.List[float]] = None
+        self.__gpu_mapper = None
+        self.__gpu_failed = False
 
     def apply(self, aberrations: typing.Mapping[str, typing.Union[int, float]], data: numpy.typing.NDArray[numpy.float32]) -> _NDArray:
         height = int(aberrations["height"])
@@ -63,6 +71,10 @@ class AberrationsController:
             if self.__coefficients.get(coefficient_name) != aberrations.get(coefficient_name):
                 # print(f"changed {coefficient_name}")
                 self.__coefficients[coefficient_name] = aberrations[coefficient_name]
+                if coefficient_name in ("c0a", "c0b"):
+                    # Beam displacement contributes a constant phase gradient.
+                    # Keep the nonlinear mapping when only the probe moves.
+                    continue
                 self.__chis.pop(coefficient_name, None)
                 self.__chi = None
                 self.__c = None
@@ -190,6 +202,8 @@ class AberrationsController:
         if self.__chi is None:
             # print("recalculating chi")
             for coefficient_name in self.coefficient_names:
+                if coefficient_name in ("c0a", "c0b"):
+                    continue
                 partial_chi = get_chi(coefficient_name)
                 if partial_chi is not None:
                     if self.__chi is None:
@@ -199,6 +213,10 @@ class AberrationsController:
                         # print(f"+ {coefficient_name}")
                         self.__chi += partial_chi
             self.__c = None
+
+        if self.__chi is None:
+            # An aberration-free focused beam still transmits electrons.
+            self.__chi = numpy.zeros((height, width))
 
         if self.__c is None and self.__chi is not None:
             # print("recalculating grad chi")
@@ -214,7 +232,21 @@ class AberrationsController:
 
         if self.__c is not None:
             # scale the offsets so that at max defocus, the coordinates cover the entire area of data.
-            return scipy.ndimage.map_coordinates(data, self.__c, order=1)  # type: ignore
+            max_chi = self.__max_defocus * theta * theta * (1 - ((1 - 1 / width)**2 + (1 - 1 / height)**2)/2)
+            dy = height/2/max_chi * (2*theta/(height-1)) * self.__coefficients.get("c0b", 0.)
+            dx = width/2/max_chi * (2*theta/(width-1)) * self.__coefficients.get("c0a", 0.)
+            backend = SimulationSettings.RONCHIGRAM_BACKEND
+            if not self.__gpu_failed and (backend == "gpu" or (backend == "auto" and data.size >= SimulationSettings.RONCHIGRAM_GPU_MINIMUM_PIXELS)):
+                try:
+                    if self.__gpu_mapper is None:
+                        self.__gpu_mapper = RonchigramContrast.GPUMapper()
+                    return self.__gpu_mapper.apply(data, self.__c, dy, dx)
+                except Exception as error:
+                    logging.getLogger(__name__).warning("Ronchigram GPU mapping failed; using CPU: %s", error)
+                    self.__gpu_failed = True
+                    self.__gpu_mapper = None
+            coordinates = [self.__c[0] + dy, self.__c[1] + dx]
+            return scipy.ndimage.map_coordinates(data, coordinates, order=1)  # type: ignore
 
         return numpy.zeros((height, width))
 
@@ -285,7 +317,8 @@ def draw_ellipse(image: _NDArray, ellipse: typing.Tuple[float, float, float, flo
 class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
     depends_on = ["C10Control", "C12Control", "C21Control", "C23Control", "C30Control", "C32Control", "C34Control",
                   "C34Control", "stage_position_m", "probe_state", "probe_position", "features",
-                  "beam_shift_m", "is_blanked", "BeamCurrent", "CAperture", "ApertureRound", "S_VOA", "ConvergenceAngle"]
+                  "beam_shift_m", "is_blanked", "BeamCurrent", "CAperture", "ApertureRound", "S_VOA", "S_MOA",
+                  "ConvergenceAngle", "stage_tilt_rad", "EHT"]
 
     def __init__(self, instrument: InstrumentDevice_.Instrument, ronchigram_shape: Geometry.IntSize, counts_per_electron: int, stage_size_nm: float) -> None:
         super().__init__(instrument, "ronchigram", ronchigram_shape, counts_per_electron)
@@ -298,7 +331,114 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         theta = self._tv_pixel_angle * ronchigram_shape.height / 2  # half angle on camera
         defocus_m = instrument.defocus_m
         self.__aberrations_controller = AberrationsController(ronchigram_shape.height, ronchigram_shape.width, theta, max_defocus, defocus_m)
-        self.noise = Noise.PoissonNoise()
+        self.noise = Noise.ElectronCountingNoise(counts_per_electron)
+        self.__kikuchi_cache_key = None
+        self.__kikuchi_pattern = None
+        self.__crystal_settings = None
+        self.__contrast_composer = None
+        self.__source_key = None
+        self.__source_data = None
+
+    def close(self) -> None:
+        self.__contrast_composer = None
+        self.__kikuchi_pattern = None
+        self.__source_data = None
+        self.__cached_frame = None
+        self.__aberrations_controller = None
+        self.noise.clear_gpu_cache()
+        super().close()
+
+    def _source_image(self, readout_area, binning_shape):
+        """Cache the sphere projection independently of probe/tilt/defocus."""
+        sample = self.instrument.scan_data_generator.sample
+        offset_m = self.instrument.stage_position_m
+        sphere = isinstance(sample, SampleSimulator.SphericalParticleSample)
+        key = None
+        if sphere:
+            key = (id(sample), offset_m.y, offset_m.x,
+                   readout_area.top, readout_area.left, readout_area.height, readout_area.width,
+                   binning_shape.height, binning_shape.width,
+                   SimulationSettings.RONCHIGRAM_TRANSMISSION_LENGTH_NM,
+                   tuple((f.position_m.y, f.position_m.x, f.radius_nm, f.reference_thickness_nm)
+                         for f in sample.features))
+            if key == self.__source_key and self.__source_data is not None:
+                return self.__source_data
+        height, width = readout_area.height, readout_area.width
+        full_fov_nm = self.__stage_size_nm
+        fov_size_nm = Geometry.FloatSize(full_fov_nm*height/self._sensor_dimensions.height,
+                                        full_fov_nm*width/self._sensor_dimensions.width)
+        center_nm = Geometry.FloatPoint(full_fov_nm*(readout_area.center.y/self._sensor_dimensions.height-.5),
+                                       full_fov_nm*(readout_area.center.x/self._sensor_dimensions.width-.5))
+        data = numpy.zeros((height, width), numpy.float32)
+        sample.plot_features(data, offset_m, fov_size_nm, Geometry.FloatPoint(), center_nm, Geometry.IntSize(height, width))
+        if sphere:
+            data = 100*KikuchiModel.transmission(data*sample.features[0].reference_thickness_nm)
+        else:
+            data = 100-data
+        data = self._get_binned_data(data, binning_shape)
+        self.__source_key = key
+        self.__source_data = data if sphere else None
+        return data
+
+    def _apply_kikuchi(self, data, readout_area, binning_shape, frame_settings, scan_context):
+        sample = self.instrument.scan_data_generator.sample
+        if not isinstance(sample, SampleSimulator.SphericalParticleSample):
+            return data, {}
+        manager = typing.cast(InstrumentDevice_.ValueManager, self.instrument.value_manager)
+        position = EELSModel.probe_sample_position(manager.actual_offset_m,
+            scan_context.fov_size_nm or Geometry.FloatSize(), scan_context.center_nm or Geometry.FloatPoint(),
+            frame_settings.current_probe_position or Geometry.FloatPoint(.5, .5), scan_context.rotation_rad)
+        thickness_nm = sum(feature.thickness_at(position) for feature in sample.features)
+        tilt = self.instrument.GetVal2D('stage_tilt_rad')
+        voltage = self.instrument.GetVal('EHT')
+        convergence = self.instrument.GetVal('ConvergenceAngle')
+        metadata = {'model': 'geometric_kikuchi_v2', 'cif': sample.crystal_cif_path,
+            'zone_axis': list(sample.zone_axis), 'thickness_nm': thickness_nm,
+            'voltage_v': voltage, 'convergence_semiangle_rad': convergence,
+            'stage_tilt_rad': {'tx': tilt.x, 'ty': tilt.y},
+            'probe_position_sample_m': {'x': position.x, 'y': position.y}, 'band_count': 0}
+        metadata['d_min_angstrom'] = SimulationSettings.KIKUCHI_D_MIN_ANGSTROM
+        # The parked position is the beam centre, not the whole illuminated
+        # region. Defocused/aberrated rays can cross the crystal even when
+        # this centre is in vacuum. Use the projected transmission footprint.
+        vacuum_level = 100*binning_shape.height*binning_shape.width
+        if not bool(((data > 0) & (data < vacuum_level-1e-4)).any()):
+            return data, metadata
+        calibrations = self.get_dimensional_calibrations(readout_area, binning_shape)
+        y_rad = calibrations[0].offset + numpy.arange(data.shape[0])*calibrations[0].scale
+        x_rad = calibrations[1].offset + numpy.arange(data.shape[1])*calibrations[1].scale
+        key = (sample.crystal_cif_path, tuple(sample.zone_axis), voltage, tilt.x, tilt.y,
+               tuple(data.shape), tuple((c.offset, c.scale) for c in calibrations),
+               SimulationSettings.KIKUCHI_D_MIN_ANGSTROM, SimulationSettings.KIKUCHI_MAX_BANDS,
+               SimulationSettings.RONCHIGRAM_BACKEND,
+               SimulationSettings.KIKUCHI_BROADENING_RAD_AT_100_NM,
+               SimulationSettings.RONCHIGRAM_PATTERN_CACHE_BYTES)
+        if key != self.__kikuchi_cache_key:
+            crystal = KikuchiModel.load_crystal(sample.crystal_cif_path)
+            visible = KikuchiModel.bands(crystal, voltage, tuple(sample.zone_axis), tilt.x, tilt.y,
+                max_angle_rad=math.atan(math.hypot(math.tan(max(abs(x_rad))), math.tan(max(abs(y_rad))))),
+                d_min_angstrom=SimulationSettings.KIKUCHI_D_MIN_ANGSTROM,
+                max_bands=SimulationSettings.KIKUCHI_MAX_BANDS)
+            # Bound interactive raster work. Width is >=0.35 mrad; a 512 grid
+            # resolves it at the default camera angle, then interpolate to readout.
+            height, width = min(512, data.shape[0]), min(512, data.shape[1])
+            pattern = KikuchiModel.render_lines(visible,
+                numpy.linspace(x_rad[0], x_rad[-1], width), numpy.linspace(y_rad[0], y_rad[-1], height))
+            if pattern.shape != data.shape:
+                yy, xx = numpy.meshgrid(numpy.linspace(0, height-1, data.shape[0]),
+                    numpy.linspace(0, width-1, data.shape[1]), indexing='ij')
+                pattern = scipy.ndimage.map_coordinates(pattern, [yy, xx], order=1)
+            # Do not apply a virtual aperture here. Physical VOA/MOA masks
+            # are applied below only when their insertion controls are on.
+            self.__kikuchi_pattern = (pattern, len(visible))
+            self.__contrast_composer = RonchigramContrast.ContrastComposer(pattern,
+                (calibrations[0].scale, calibrations[1].scale), SimulationSettings.RONCHIGRAM_BACKEND)
+            self.__kikuchi_cache_key = key
+        pattern, metadata['band_count'] = self.__kikuchi_pattern
+        data, contrast_metadata = self.__contrast_composer.compose(data, vacuum_level)
+        metadata.update(contrast_metadata)
+        metadata['probe_diffusion_sigma_rad'] = float(KikuchiModel.diffusion_sigma_rad(thickness_nm))
+        return data, metadata
 
     @property
     def _tv_pixel_angle(self) -> float:
@@ -333,32 +473,25 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
 
     def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: stem_controller.ScanContext, parked_probe_position: typing.Optional[Geometry.FloatPoint]) -> DataAndMetadata.DataAndMetadata:
         frame_settings = self._get_frame_settings(readout_area, binning_shape, exposure_s, scan_context, parked_probe_position)
+        sample = self.instrument.scan_data_generator.sample
+        crystal_settings = (getattr(sample, 'crystal_cif_path', None), tuple(getattr(sample, 'zone_axis', ())))
+        if crystal_settings != self.__crystal_settings:
+            self._needs_recalculation = True
+            self.__crystal_settings = crystal_settings
         if frame_settings != self._last_frame_settings:
             self._needs_recalculation = True
             self._last_frame_settings = frame_settings
 
         if self._needs_recalculation or self.__cached_frame is None:
             # print("recalculating frame")
-            height = readout_area.height
-            width = readout_area.width
-            offset_m = self.instrument.stage_position_m
-            # full_fov_nm = abs(self.instrument.GetVal("C10Control")) * self._tv_pixel_angle * self._sensor_dimensions.height * 1e9
-            full_fov_nm = self.__stage_size_nm
-            fov_size_nm = Geometry.FloatSize(full_fov_nm * height / self._sensor_dimensions.height, full_fov_nm * width / self._sensor_dimensions.width)
-            center_nm = Geometry.FloatPoint(
-                full_fov_nm * (readout_area.center.y / self._sensor_dimensions.height - 0.5),
-                full_fov_nm * (readout_area.center.x / self._sensor_dimensions.width - 0.5))
-            size = Geometry.IntSize(height, width)
-            data: numpy.typing.NDArray[numpy.float32] = numpy.zeros((height, width), numpy.float32)
-            # features will be positive values; thickness can be simulated by subtracting the features from the
-            # vacuum value. the higher the vacuum value, the thinner (i.e. less contribution from features).
             thickness_param = 100
             value_manager = typing.cast(InstrumentDevice_.ValueManager, self.instrument.value_manager)
+            metadata = {}
             if not value_manager.is_blanked:
-                scan_data_generator = typing.cast(InstrumentDevice_.ScanDataGenerator, self.instrument.scan_data_generator)
-                scan_data_generator.sample.plot_features(data, offset_m, fov_size_nm, Geometry.FloatPoint(), center_nm, size)
-                data = thickness_param - data
-            data = self._get_binned_data(data, binning_shape)
+                data = self._source_image(readout_area, binning_shape)
+            else:
+                data = numpy.zeros((readout_area.height//binning_shape.height,
+                                    readout_area.width//binning_shape.width), numpy.float32)
 
             if not value_manager.is_blanked:
                 scan_offset = Geometry.FloatPoint()
@@ -389,6 +522,10 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                 aberrations["c34a"] = self.instrument.GetVal2D("C34Control").x
                 aberrations["c34b"] = self.instrument.GetVal2D("C34Control").y
                 data = self.__aberrations_controller.apply(aberrations, data)
+                data, metadata = self._apply_kikuchi(data, readout_area, binning_shape, frame_settings, scan_context)
+                if not isinstance(data, numpy.ndarray):
+                    # Vacuum/non-crystalline frames bypass the compositor.
+                    data = data.get()
                 if self.instrument.GetVal("S_VOA") > 0:
                     self._draw_aperture(data, binning_shape)
                 elif self.instrument.GetVal("S_MOA") > 0:
@@ -397,21 +534,27 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             intensity_calibration = Calibration.Calibration(units="counts")
             dimensional_calibrations = self.get_dimensional_calibrations(readout_area, binning_shape)
 
-            self.__cached_frame = DataAndMetadata.new_data_and_metadata(data.astype(numpy.float32), intensity_calibration=intensity_calibration, dimensional_calibrations=dimensional_calibrations)
+            self.__cached_frame = DataAndMetadata.new_data_and_metadata(data.astype(numpy.float32), intensity_calibration=intensity_calibration, dimensional_calibrations=dimensional_calibrations,
+                metadata={'kikuchi_simulation': metadata} if metadata else {})
             self.__data_scale = self.get_total_counts(exposure_s) / (data.shape[0] * data.shape[1] * thickness_param)
             self._needs_recalculation = False
 
-        self.noise.poisson_level = self.__data_scale
         assert self.__cached_frame
-        return self.noise.apply(self.__cached_frame * self.__data_scale)
+        use_gpu = (SimulationSettings.RONCHIGRAM_BACKEND != "cpu"
+                   and self.__contrast_composer is not None and self.__contrast_composer.backend == "gpu")
+        result = (self.noise.apply_gpu(self.__cached_frame, self.__data_scale) if use_gpu
+                  else self.noise.apply(self.__cached_frame * self.__data_scale))
+        return DataAndMetadata.new_data_and_metadata(result.data,
+            intensity_calibration=result.intensity_calibration, dimensional_calibrations=result.dimensional_calibrations,
+            metadata=self.__cached_frame.metadata, timestamp=result.timestamp)
 
     def get_dimensional_calibrations(self, readout_area: typing.Optional[Geometry.IntRect], binning_shape: typing.Optional[Geometry.IntSize]) -> typing.Sequence[Calibration.Calibration]:
-        height = readout_area.height if readout_area else self._sensor_dimensions[0]
-        width = readout_area.width if readout_area else self._sensor_dimensions[1]
-        scale_y = self._tv_pixel_angle
-        scale_x = self._tv_pixel_angle
-        offset_y = -scale_y * height * 0.5
-        offset_x = -scale_x * width * 0.5
+        area = readout_area or Geometry.IntRect(origin=Geometry.IntPoint(), size=self._sensor_dimensions)
+        bins = binning_shape or Geometry.IntSize(1, 1)
+        scale_y = self._tv_pixel_angle * bins.height
+        scale_x = self._tv_pixel_angle * bins.width
+        offset_y = self._tv_pixel_angle * (area.top + (bins.height-1)/2 - self._sensor_dimensions.height/2)
+        offset_x = self._tv_pixel_angle * (area.left + (bins.width-1)/2 - self._sensor_dimensions.width/2)
         dimensional_calibrations = [
             Calibration.Calibration(offset=offset_y, scale=scale_y, units="rad"),
             Calibration.Calibration(offset=offset_x, scale=scale_x, units="rad")

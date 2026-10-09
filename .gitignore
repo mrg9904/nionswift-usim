@@ -102,6 +102,7 @@ ENV/
 
 # Local EELS verification artifacts.
 tools/eels_thickness_results/
+tools/kikuchi_results/
 
 # Temporary Nion acquisition test settings.
 test_data/

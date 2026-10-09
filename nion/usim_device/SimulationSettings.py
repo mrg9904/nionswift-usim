@@ -171,3 +171,19 @@ STL_EELS_MEAN_FREE_PATH_NM = 100.0
 EELS_BACKGROUND_FRACTION = 0.25
 EELS_BACKGROUND_EXPONENT = 2.5
 EELS_BACKGROUND_TRANSITION_EV = 50.0
+
+# Kikuchi reflector coverage. 0.75 A includes the next family omitted by
+# the old 1 A limit. Lower further for more high-order lines (more CPU work).
+KIKUCHI_D_MIN_ANGSTROM = 0.75
+KIKUCHI_MAX_BANDS = 160
+
+# Phenomenological Ronchigram contrast/scattering parameters, not fitted
+# elastic/inelastic mean free paths or dynamical diffraction predictions.
+RONCHIGRAM_TRANSMISSION_LENGTH_NM = 150.0
+RONCHIGRAM_DIFFUSE_LENGTH_NM = 120.0
+RONCHIGRAM_DIFFUSE_SIGMA_RAD = 0.003
+KIKUCHI_BROADENING_RAD_AT_100_NM = 0.0008
+# Ronchigram blur banks are local to each camera and replaced on geometry changes.
+RONCHIGRAM_BACKEND = "auto"  # auto, cpu, gpu (CUDA failures fall back to CPU)
+RONCHIGRAM_GPU_MINIMUM_PIXELS = 512 * 512
+RONCHIGRAM_PATTERN_CACHE_BYTES = 256 * 1024 * 1024
