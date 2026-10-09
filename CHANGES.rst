@@ -3,6 +3,9 @@ Changelog (nionswift-usim)
 
 Unreleased
 ----------
+- Enable interactive focus/stage positioning from Ronchigram as well as scan
+  displays; add T/Y and Shift+T/Y shortcuts for stage TX/TY, using the existing
+  live controls and the Ronchigram aberration mapping for double-click motion.
 - Add a normalized power-law EELS continuum with a smooth low-loss turnover,
   thickness-driven plural scattering and window-independent tail probabilities;
   include background metadata, numerical regressions and sphere comparison plots.

@@ -250,6 +250,23 @@ class AberrationsController:
 
         return numpy.zeros((height, width))
 
+    def source_displacement(self, position, image_shape):
+        """Relative source coordinates of a displayed pixel and image centre.
+
+        Use the actual nonlinear aberration mapping, including defocus sign.
+        The constant beam/probe displacement cancels between the two points.
+        """
+        coordinates = self.__c
+        if coordinates is None:
+            return None
+        height, width = coordinates[0].shape
+        row = (position.y+.5)/image_shape[0]*height-.5
+        column = (position.x+.5)/image_shape[1]*width-.5
+        points = [[row, (height-1)/2], [column, (width-1)/2]]
+        y = scipy.ndimage.map_coordinates(coordinates[0], points, order=1, mode="nearest")
+        x = scipy.ndimage.map_coordinates(coordinates[1], points, order=1, mode="nearest")
+        return Geometry.FloatPoint(y=float(y[0]-y[1])/height, x=float(x[0]-x[1])/width)
+
 
 def ellipse_radius(polar_angle: typing.Union[float, _NDArray], a: float, b: float, rotation: float) -> typing.Union[float, _NDArray]:
     """
@@ -379,6 +396,21 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         self.__source_key = key
         self.__source_data = data if sphere else None
         return data
+
+    def stage_displacement_for_pixel(self, position, image_shape):
+        """Convert a Ronchigram double click into specimen displacement in m."""
+        settings = self._last_frame_settings
+        if settings is None or self._needs_recalculation or self.__cached_frame is None:
+            return None
+        if self.instrument.value_manager.is_blanked:
+            return None
+        displacement = self.__aberrations_controller.source_displacement(position, image_shape)
+        if displacement is None:
+            return None
+        area = settings.readout_area
+        return Geometry.FloatPoint(
+            y=displacement.y*self.__stage_size_nm*area.height/self._sensor_dimensions.height*1e-9,
+            x=displacement.x*self.__stage_size_nm*area.width/self._sensor_dimensions.width*1e-9)
 
     def _apply_kikuchi(self, data, readout_area, binning_shape, frame_settings, scan_context):
         sample = self.instrument.scan_data_generator.sample

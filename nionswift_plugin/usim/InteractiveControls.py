@@ -1,13 +1,15 @@
-"""Interactive mouse and keyboard controls for uSim scan displays.
+"""Interactive mouse and keyboard controls for uSim scan and Ronchigram displays.
 
 Controls
 --------
 Double click
-    Move the clicked specimen position to the center of the scan.
-E / R
+    Move the clicked specimen position to the image center.
+R / E
     Decrease / increase the current scan field of view.
-S / D
-    Decrease / increase C10Control (defocus).
+D / F
+    Decrease / increase the instrument defocus.
+T / Y (Shift reverses direction)
+    Increase stage TX / TY by the configured degree step.
 
 Nion Swift 16.16.2 exposes display-panel key events, but it does not expose
 image mouse-wheel or image double-click events to plug-ins. This module hooks
@@ -56,20 +58,24 @@ class InteractiveControlManager:
         # does not matter.
         return getattr(self.__scan_module, "hardware_source", None)
 
-    def __is_usim_scan_display(self, display_panel: typing.Any) -> bool:
-        """Return True only for data produced by this uSim scan source."""
+    @property
+    def __ronchigram_camera(self) -> typing.Any:
+        return getattr(getattr(self.__instrument, "value_manager", None), "ronchigram_camera", None)
+
+    def __display_kind(self, display_panel: typing.Any) -> typing.Optional[str]:
+        """Identify this instrument's scan/camera data by source ID."""
 
         scan_hardware_source = self.__scan_hardware_source
-        if scan_hardware_source is None or display_panel is None:
-            return False
+        if display_panel is None:
+            return None
 
         data_item = getattr(display_panel, "data_item", None)
         if data_item is None:
-            return False
+            return None
 
         metadata = getattr(data_item, "metadata", None)
         if not isinstance(metadata, dict):
-            return False
+            return None
 
         scan_metadata = metadata.get("scan", dict())
         hardware_metadata = metadata.get("hardware_source", dict())
@@ -79,14 +85,21 @@ class InteractiveControlManager:
             None,
         )
 
-        return (
+        camera_id = getattr(self.__ronchigram_camera, "camera_id", None)
+        camera_metadata = metadata.get("camera", {})
+        if camera_id is not None and any(isinstance(section, dict) and
+                section.get("hardware_source_id") == camera_id
+                for section in (hardware_metadata, camera_metadata)):
+            return "ronchigram"
+        if hardware_source_id is not None and ((
             isinstance(scan_metadata, dict)
             and scan_metadata.get("hardware_source_id") == hardware_source_id
         ) or (
             isinstance(hardware_metadata, dict)
-            and hardware_metadata.get("hardware_source_id")
-            == hardware_source_id
-        )
+            and hardware_metadata.get("hardware_source_id") == hardware_source_id
+        )):
+            return "scan"
+        return None
 
     def handle_mouse_wheel(
         self,
@@ -95,7 +108,7 @@ class InteractiveControlManager:
         dy: int,
         is_horizontal: bool,
     ) -> bool:
-        """Adjust defocus when scrolling over a uSim scan image."""
+        """Adjust defocus over this instrument's scan or Ronchigram image."""
 
         if not InteractiveControlSettings.INTERACTIVE_CONTROLS_ENABLED:
             return False
@@ -108,7 +121,7 @@ class InteractiveControlManager:
 
         display_panel = getattr(image_canvas_item, "delegate", None)
 
-        if not self.__is_usim_scan_display(display_panel):
+        if self.__display_kind(display_panel) is None:
             return False
 
         wheel_sign = 1.0 if dy > 0 else -1.0
@@ -137,7 +150,8 @@ class InteractiveControlManager:
             return False
 
         display_panel = getattr(image_canvas_item, "delegate", None)
-        if not self.__is_usim_scan_display(display_panel):
+        display_kind = self.__display_kind(display_panel)
+        if display_kind is None:
             return False
 
         if (
@@ -170,6 +184,20 @@ class InteractiveControlManager:
         if image_height <= 0 or image_width <= 0:
             return False
 
+        if not (0 <= image_position.x < image_width and 0 <= image_position.y < image_height):
+            return False
+        if display_kind == "ronchigram":
+            camera = self.__ronchigram_camera
+            # Runtime cameras come from nion.device_kit, not the legacy local
+            # CameraDevice module. Use their public simulator interface.
+            mapping = getattr(getattr(camera, "simulator", None), "stage_displacement_for_pixel", None)
+            if not callable(mapping):
+                return False
+            delta = mapping(image_position, data_shape)
+            if delta is None:
+                return False
+            return self.__move_stage(delta*1e9)
+
         scan_hardware_source = self.__scan_hardware_source
         if scan_hardware_source is None:
             return False
@@ -197,6 +225,10 @@ class InteractiveControlManager:
         specimen_delta_nm = image_delta_nm.rotate(
             frame_parameters.rotation_rad
         )
+
+        return self.__move_stage(specimen_delta_nm)
+
+    def __move_stage(self, specimen_delta_nm: Geometry.FloatPoint) -> bool:
 
         stage_position_m = self.__instrument.get_value_2d(
             "stage_position_m"
@@ -234,20 +266,28 @@ class InteractiveControlManager:
         display_panel: typing.Any,
         key: UserInterface.Key,
     ) -> bool:
-        """Handle E/R FoV and S/D defocus on a uSim scan display."""
+        """Handle E/R scan FoV, D/F focus and T/Y tilt in either display."""
 
         if not InteractiveControlSettings.INTERACTIVE_CONTROLS_ENABLED:
             return False
         if not InteractiveControlSettings.ENABLE_KEYBOARD_CONTROLS:
             return False
-        if not self.__is_usim_scan_display(display_panel):
+        if self.__display_kind(display_panel) is None:
             return False
 
         modifiers = key.modifiers
-        if modifiers.control or modifiers.shift or modifiers.alt:
+        if modifiers.control or modifiers.alt or getattr(modifiers, "meta", False):
             return False
 
         key_text = (key.text or "").lower()
+        if key_text in (InteractiveControlSettings.TILT_X_KEY, InteractiveControlSettings.TILT_Y_KEY):
+            tilt = self.__instrument.get_value_2d("stage_tilt_rad")
+            delta = math.radians(InteractiveControlSettings.TILT_STEP_DEG) * (-1 if modifiers.shift else 1)
+            new_tilt = Geometry.FloatPoint(y=tilt.y + (delta if key_text == InteractiveControlSettings.TILT_Y_KEY else 0),
+                                          x=tilt.x + (delta if key_text == InteractiveControlSettings.TILT_X_KEY else 0))
+            return bool(self.__instrument.set_value_2d("stage_tilt_rad", new_tilt))
+        if modifiers.shift:
+            return False
 
         if key_text == InteractiveControlSettings.DEFOCUS_DECREASE_KEY:
             return self.__change_defocus(
@@ -369,7 +409,7 @@ def run(instrument: typing.Any, scan_module: typing.Any) -> None:
         key: UserInterface.Key,
     ) -> bool:
         # Nion Swift maps E to the pointer tool before the public key event is
-        # fired. Intercept uSim keys first so E/R/S/D are all deterministic.
+        # fired. Intercept microscope controls before the built-in tools.
         manager = _manager
         if manager is not None and manager.handle_key_pressed(
             display_panel,

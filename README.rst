@@ -359,6 +359,28 @@ computation times; camera exposure and Nion display overhead also affect
 the visible live refresh rate.
 
 
+Interactive microscope controls
+-------------------------------
+
+Interactive microscope controls work while the **uSim HAADF scan** or
+**uSim Ronchigram Camera** display has focus:
+
+- ``D`` / ``F`` decrease/increase defocus by 10 nm; the mouse wheel changes it by 1 nm.
+- ``T`` increases stage TX, ``Y`` increases TY, by 0.1 degrees. ``Shift+T``
+  and ``Shift+Y`` decrease the corresponding tilt. The instrument panel's
+  TX/TY fields show the same values and the Kikuchi orientation updates live.
+- Double-click with the pointer tool to move the specimen point to the image
+  centre. HAADF uses scan FoV/rotation; Ronchigram uses the actual aberration
+  ray mapping, including negative defocus and astigmatism. A focused image
+  with no spatial mapping gives zero displacement. Wait for the next frame
+  after changing optics before using Ronchigram double-click positioning.
+- ``R`` / ``E`` decrease/increase the selected HAADF scan profile's FoV from
+  either display. They do not change the camera angular calibration.
+
+Steps and directions are configurable in
+``nionswift_plugin/usim/InteractiveControlSettings.py``. Ctrl/Alt/Meta shortcuts,
+modified double-clicks and unrelated data displays retain their normal behavior.
+
 Sample-specific initial views
 -----------------------------
 

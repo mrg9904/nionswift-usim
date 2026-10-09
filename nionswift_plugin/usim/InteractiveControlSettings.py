@@ -48,13 +48,13 @@ STAGE_Y_DIRECTION = 1.0
 
 ENABLE_KEYBOARD_CONTROLS = True
 
-# The keys are compared case-insensitively and require no modifiers.
+# Keys are case-insensitive; only tilt keys accept Shift to reverse direction.
 FOV_DECREASE_KEY = "r"
 FOV_INCREASE_KEY = "e"
 DEFOCUS_DECREASE_KEY = "d"
 DEFOCUS_INCREASE_KEY = "f"
 
-# E multiplies the FoV by 0.8; R multiplies it by 1.25.
+# R multiplies the FoV by 0.8; E multiplies it by 1.25.
 # These values are reciprocal, so one E followed by one R restores the
 # original FoV, apart from floating-point rounding.
 FOV_ZOOM_IN_FACTOR = 0.8
@@ -66,3 +66,8 @@ MINIMUM_FOV_NM = 5.0
 # in the uSim Instrument panel and feeds the effective C10Control used by the
 # HAADF focus model. A 1 nm change is usually too small to see, so use 10 nm.
 DEFOCUS_STEP_NM = 10.0
+
+# T changes TX, Y changes TY. Shift reverses either direction.
+TILT_X_KEY = "t"
+TILT_Y_KEY = "y"
+TILT_STEP_DEG = 0.1
