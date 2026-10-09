@@ -1,15 +1,16 @@
 """Geometry-driven, synthetic compound-Poisson energy-loss model.
 
 Independent inelastic events use tau=sum(t/lambda). Single-event kernels are
-phenomenological plasmon/core-edge shapes, not cross-section calculations.
+phenomenological plasmon/core-edge/power-law continuum shapes, not cross-section calculations.
 Convolution is linear and truncated beyond the modeled energy range; missing
 high-energy counts are never renormalized into the detector window.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 import numpy as np
 from scipy import signal, stats
 from nion.utils import Geometry
+from nion.usim_device import SimulationSettings
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,9 @@ class EELSMaterial:
     plasmon_eV: float = 20.0
     mean_free_path_nm: float = 100.0
     core_fraction: float = .03
+    background_fraction: float = field(default_factory=lambda: SimulationSettings.EELS_BACKGROUND_FRACTION)
+    background_exponent: float = field(default_factory=lambda: SimulationSettings.EELS_BACKGROUND_EXPONENT)
+    background_transition_eV: float = field(default_factory=lambda: SimulationSettings.EELS_BACKGROUND_TRANSITION_EV)
 
     def validate(self):
         if not math.isfinite(self.mean_free_path_nm) or self.mean_free_path_nm <= 0:
@@ -26,6 +30,13 @@ class EELSMaterial:
             raise ValueError("EELS plasmon energy must be finite and positive")
         if not math.isfinite(self.core_fraction) or not 0 <= self.core_fraction <= 1:
             raise ValueError("EELS core fraction must be between zero and one")
+        if (not math.isfinite(self.background_fraction) or self.background_fraction < 0 or
+                self.background_fraction+self.core_fraction > 1):
+            raise ValueError("EELS core and background fractions must be nonnegative and sum to at most one")
+        if not math.isfinite(self.background_exponent) or self.background_exponent <= 1:
+            raise ValueError("EELS background exponent must be finite and greater than one")
+        if not math.isfinite(self.background_transition_eV) or self.background_transition_eV <= 0:
+            raise ValueError("EELS background transition must be finite and positive")
         for energy, width in self.edges:
             if not math.isfinite(energy) or energy <= 0 or not math.isfinite(width) or width <= 0:
                 raise ValueError("EELS edges require positive finite onset and width")
@@ -47,6 +58,23 @@ def probe_sample_position(offset_m, fov_size_nm, center_nm, probe_position, rota
         y=(center_nm.y + sine*x + cosine*y)*1e-9 - offset_m.y)
 
 
+def powerlaw_background_cdf(energy, exponent, transition_eV):
+    """Normalized continuous loss distribution; exact E^-r above transition.
+
+    Below E0 use x^2 * ((r+3)-(r+2)*x), x=E/E0. Value and first
+    derivative match the tail at E0; density vanishes at zero loss.
+    Analytic normalization extends to infinity, independent of detector range.
+    """
+    if not math.isfinite(exponent) or exponent <= 1 or not math.isfinite(transition_eV) or transition_eV <= 0:
+        raise ValueError("Power-law background requires exponent > 1 and positive transition")
+    x = np.maximum(np.asarray(energy, dtype=float), 0)/transition_eV
+    low = np.minimum(x, 1.)
+    normalization = (exponent+6)/12 + 1/(exponent-1)
+    low_integral = (exponent+3)*low**3/3 - (exponent+2)*low**4/4
+    tail_integral = (exponent+6)/12 - np.expm1((1-exponent)*np.log(np.maximum(x, 1.)))/(exponent-1)
+    return np.where(x <= 1, low_integral, tail_integral)/normalization
+
+
 def single_event_kernel(material, energy):
     material.validate()
     plasmon = stats.norm.pdf(energy, loc=material.plasmon_eV, scale=math.sqrt(material.plasmon_eV))
@@ -57,10 +85,19 @@ def single_event_kernel(material, energy):
         total = edge.sum()
         if total > 0:
             core += edge / total
+    core_fraction = 0.
     if core.sum() > 0:
         core /= core.sum()
-        return (1-material.core_fraction)*plasmon + material.core_fraction*core
-    return plasmon
+        core_fraction = material.core_fraction
+    # Integrate the continuum per quadrature bin. Never renormalize a long
+    # power-law tail into the finite computational/detector window.
+    background = np.zeros_like(energy)
+    if material.background_fraction:
+        step = float(energy[1]-energy[0])
+        background = (powerlaw_background_cdf(energy+step/2, material.background_exponent, material.background_transition_eV)
+                      - powerlaw_background_cdf(energy-step/2, material.background_exponent, material.background_transition_eV))
+    return ((1-core_fraction-material.background_fraction)*plasmon + core_fraction*core
+            + material.background_fraction*background)
 
 
 def spectrum_probabilities(layers, channel_energies, dispersion_eV, zlp_sigma_eV=.5):
@@ -78,6 +115,7 @@ def spectrum_probabilities(layers, channel_energies, dispersion_eV, zlp_sigma_eV
     tau = 0.0
     thickness = 0.0
     weighted = []
+    background_depth = 0.
     for layer in layers:
         layer.material.validate()
         if not math.isfinite(layer.thickness_nm) or layer.thickness_nm < 0:
@@ -85,6 +123,7 @@ def spectrum_probabilities(layers, channel_energies, dispersion_eV, zlp_sigma_eV
         thickness += layer.thickness_nm
         depth = layer.thickness_nm / layer.material.mean_free_path_nm
         tau += depth
+        background_depth += depth*layer.material.background_fraction
         if depth:
             weighted.append((depth, layer.material))
     if not math.isfinite(tau):
@@ -94,7 +133,14 @@ def spectrum_probabilities(layers, channel_energies, dispersion_eV, zlp_sigma_eV
     upper = channel_energies + dispersion_eV/2
     probabilities = p0 * (stats.norm.cdf(upper, scale=zlp_sigma_eV) - stats.norm.cdf(lower, scale=zlp_sigma_eV))
     metadata = {"thickness_nm": thickness, "t_over_lambda": tau,
-                "zero_loss_fraction": p0, "model": "synthetic_compound_poisson_v1"}
+                "zero_loss_fraction": p0, "model": "synthetic_compound_poisson_powerlaw_v2",
+                "background_event_optical_depth": background_depth,
+                "background_event_probability": -math.expm1(-background_depth),
+                "background_components": [{"t_over_lambda": depth,
+                    "single_event_fraction": material.background_fraction,
+                    "exponent": material.background_exponent,
+                    "transition_eV": material.background_transition_eV}
+                    for depth, material in weighted if material.background_fraction]}
     if tau:
         step = min(.25, dispersion_eV)
         limit = max(4000., float(upper.max()) + 10*zlp_sigma_eV)

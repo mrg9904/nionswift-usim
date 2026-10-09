@@ -14,6 +14,76 @@ from nion.utils import Geometry
 
 
 class TestEELSModel(unittest.TestCase):
+    def test_background_tail_has_requested_power_law_and_infinite_normalization(self):
+        material = EELSModel.EELSMaterial(edges=(), core_fraction=0, background_fraction=1,
+                                          background_exponent=2.7)
+        energy = np.arange(0, 4000.25, .25)
+        kernel = EELSModel.single_event_kernel(material, energy)
+        region = (energy > 200) & (energy < 2000)
+        slope = np.polyfit(np.log(energy[region]), np.log(kernel[region]), 1)[0]
+        self.assertAlmostEqual(slope, -2.7, places=5)
+        self.assertAlmostEqual(kernel.sum(), float(EELSModel.powerlaw_background_cdf(energy[-1]+.125, 2.7, 50)), places=13)
+        self.assertLess(kernel.sum(), 1)
+        self.assertEqual(float(EELSModel.powerlaw_background_cdf(-1, 2.7, 50)), 0)
+        self.assertEqual(float(EELSModel.powerlaw_background_cdf(float('inf'), 2.7, 50)), 1)
+        small = EELSModel.single_event_kernel(material, energy[:2000])
+        np.testing.assert_allclose(small, kernel[:2000], atol=1e-15)
+
+    def test_background_joins_smoothly_without_zero_loss_singularity(self):
+        r, onset = 2.5, 50.
+        energy = np.linspace(onset-.1, onset+.1, 201)
+        cdf = EELSModel.powerlaw_background_cdf(energy, r, onset)
+        density = np.gradient(cdf, energy)
+        self.assertLess(abs(density[99]-density[101]), 2e-6)
+        self.assertTrue(np.isfinite(EELSModel.powerlaw_background_cdf(np.arange(-5, 105), r, onset)).all())
+        low = EELSModel.powerlaw_background_cdf(.001, r, onset)
+        self.assertLess(low, 1e-13)
+
+    def test_continuum_grows_with_thickness_and_disappears_in_vacuum(self):
+        material = EELSModel.EELSMaterial(edges=(), core_fraction=0)
+        energy = np.arange(-20, 2000, .5)
+        region = (energy >= 300) & (energy < 700)
+        intensity = []
+        for thickness in (0, 1, 2, 20, 50, 100, 200):
+            data, info = EELSModel.spectrum_probabilities([EELSModel.EELSLayer(thickness, material)], energy, .5)
+            intensity.append(data[region].sum())
+            expected = thickness/100*material.background_fraction
+            self.assertAlmostEqual(info['background_event_optical_depth'], expected)
+            self.assertAlmostEqual(info['background_event_probability'], -math.expm1(-expected))
+            self.assertAlmostEqual(info['zero_loss_fraction'], math.exp(-thickness/100))
+        self.assertEqual(intensity[0], 0)
+        self.assertTrue(np.all(np.diff(intensity) > 0))
+        self.assertAlmostEqual(intensity[2]/intensity[1], 2, delta=.03)
+        off, _ = EELSModel.spectrum_probabilities([EELSModel.EELSLayer(100,
+            EELSModel.EELSMaterial(edges=(), core_fraction=0, background_fraction=0))], energy, .5)
+        self.assertLess(off[region].sum(), intensity[-2]*1e-6)
+
+    def test_background_conserves_dose_across_windows_and_layers(self):
+        material = EELSModel.EELSMaterial(edges=(), core_fraction=0, background_fraction=1,
+                                          background_exponent=1.5)
+        energy = np.arange(-20, 6000, 1.)
+        full, info = EELSModel.spectrum_probabilities([EELSModel.EELSLayer(100, material)], energy, 1.)
+        split, _ = EELSModel.spectrum_probabilities([EELSModel.EELSLayer(40, material), EELSModel.EELSLayer(60, material)], energy, 1.)
+        np.testing.assert_allclose(split, full, atol=2e-14)
+        cropped, _ = EELSModel.spectrum_probabilities([EELSModel.EELSLayer(100, material)], energy[420:1020], 1.)
+        np.testing.assert_allclose(cropped, full[420:1020], atol=2e-14)
+        self.assertLess(full.sum(), 1)
+        self.assertGreater(full.sum(), info['zero_loss_fraction'])
+        self.assertGreater(cropped.sum(), 0)
+        mixed, metadata = EELSModel.spectrum_probabilities([
+            EELSModel.EELSLayer(50, material), EELSModel.EELSLayer(50,
+            EELSModel.EELSMaterial(background_fraction=.2, background_exponent=3))], energy[:1020], 1.)
+        self.assertAlmostEqual(metadata['background_event_optical_depth'], .6)
+        self.assertEqual(len(metadata['background_components']), 2)
+        self.assertTrue(np.isfinite(mixed).all())
+
+    def test_invalid_background_parameters_are_rejected(self):
+        for kwargs in ({'background_fraction': -1}, {'background_fraction': .99},
+                       {'background_fraction': float('nan')}, {'background_exponent': 1},
+                       {'background_exponent': float('inf')}, {'background_transition_eV': 0}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                EELSModel.EELSMaterial(**kwargs).validate()
+
     def test_sphere_thickness_from_center_to_edge_and_bounding_box_vacuum(self):
         sample = SampleSimulator.SphericalParticleSample(1000)
         for radius in (0, 20, 40, 49, 50, 55):
@@ -46,7 +116,7 @@ class TestEELSModel(unittest.TestCase):
 
     def test_plural_scattering_peak_areas_follow_poisson_law(self):
         # Narrow, well-separated plasmons expose scattering orders quantitatively.
-        material = EELSModel.EELSMaterial(edges=(), plasmon_eV=100, core_fraction=0)
+        material = EELSModel.EELSMaterial(edges=(), plasmon_eV=100, core_fraction=0, background_fraction=0)
         energies = np.arange(-20, 2000, .25)
         for tau in (.2, 1., 2.):
             data, info = EELSModel.spectrum_probabilities([EELSModel.EELSLayer(tau*100, material)], energies, .25)

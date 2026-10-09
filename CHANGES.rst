@@ -3,6 +3,9 @@ Changelog (nionswift-usim)
 
 Unreleased
 ----------
+- Add a normalized power-law EELS continuum with a smooth low-loss turnover,
+  thickness-driven plural scattering and window-independent tail probabilities;
+  include background metadata, numerical regressions and sphere comparison plots.
 - Use local STL/spherical/block specimen thickness for EELS instead of fixed feature counts.
 - Add thickness-dependent compound-Poisson plural loss, window-conserving channel integration,
   independent energy binning, electron-counting noise and geometry metadata.

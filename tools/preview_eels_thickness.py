@@ -13,16 +13,22 @@ OUTPUT = Path(__file__).resolve().parent / 'eels_thickness_results'
 
 
 def generate(directory):
+    from dataclasses import replace
     from nion.usim_device import EELSModel, SampleSimulator
     from nion.utils import Geometry
     sphere = SampleSimulator.SphericalParticleSample(1000)
     energy = np.arange(-20., 1400., .5)
     radii = np.asarray([0., 20., 40., 49., 55.])
     spectra, thickness, optical, zlp, captured = [], [], [], [], []
+    without_background = []
     for radius in radii:
         layers = sphere.eels_layers_at(Geometry.FloatPoint(x=radius*1e-9, y=0))
         spectrum, info = EELSModel.spectrum_probabilities(layers, energy, .5)
         spectra.append(spectrum)
+        old_layers = [EELSModel.EELSLayer(layer.thickness_nm, replace(layer.material, background_fraction=0))
+                      for layer in layers]
+        old, _ = EELSModel.spectrum_probabilities(old_layers, energy, .5)
+        without_background.append(old)
         thickness.append(info['thickness_nm'])
         optical.append(info['t_over_lambda'])
         zlp.append(info['zero_loss_fraction'])
@@ -31,10 +37,17 @@ def generate(directory):
     xx, yy = np.meshgrid(axis_nm, axis_nm)
     image_thickness = 2*np.sqrt(np.maximum(0, 50**2-xx**2-yy**2))
     directory.mkdir(parents=True, exist_ok=True)
+    material = EELSModel.EELSMaterial(edges=(), core_fraction=0, background_fraction=1)
+    kernel_energy = np.arange(0, 2000.5, .5)
+    continuum_density = EELSModel.single_event_kernel(material, kernel_energy)/.5
     np.savez_compressed(directory/'sphere_eels.npz', energy_eV=energy, radius_nm=radii,
         thickness_nm=thickness, t_over_lambda=optical, zero_loss_fraction=zlp,
         detector_window_fraction=captured, spectra_per_incident_electron=spectra,
-        ideal_haadf=image_thickness/20, axis_nm=axis_nm)
+        ideal_haadf=image_thickness/20, axis_nm=axis_nm,
+        spectra_without_background=without_background,
+        continuum_energy_eV=kernel_energy, continuum_density_per_eV=continuum_density,
+        background_exponent=material.background_exponent,
+        background_transition_eV=material.background_transition_eV)
     with (directory/'sphere_eels.csv').open('w', newline='', encoding='utf-8') as stream:
         writer = csv.writer(stream)
         writer.writerow(['radius_nm','thickness_nm','t_over_lambda','zero_loss_fraction','detector_window_fraction'])
@@ -55,6 +68,11 @@ def render(directory):
         thickness = data['thickness_nm']
         zlp = data['zero_loss_fraction']
         image = data['ideal_haadf']
+        old_spectra = data['spectra_without_background']
+        continuum_energy = data['continuum_energy_eV']
+        continuum_density = data['continuum_density_per_eV']
+        exponent = float(data['background_exponent'])
+        transition = float(data['background_transition_eV'])
     fig = Figure(figsize=(12, 8), layout="constrained")
     FigureCanvasAgg(fig)
     axes = fig.subplots(2, 2)
@@ -89,6 +107,38 @@ def render(directory):
     fig.suptitle('uSim EELS thickness verification - deterministic synthetic model')
     fig.savefig(directory/'sphere_eels_thickness.png', dpi=160)
     print(directory/'sphere_eels_thickness.png')
+
+    comparison = Figure(figsize=(12, 8), layout='constrained')
+    FigureCanvasAgg(comparison)
+    panels = comparison.subplots(2, 2)
+    positive = continuum_energy > 0
+    panels[0,0].loglog(continuum_energy[positive], continuum_density[positive], label='Single-event continuum')
+    tail = continuum_energy >= transition
+    anchor = np.flatnonzero(tail)[0]
+    panels[0,0].loglog(continuum_energy[tail], continuum_density[anchor]*(continuum_energy[tail]/transition)**(-exponent),
+                       '--', label=f'E^-{exponent:g} reference')
+    panels[0,0].axvline(transition, color='gray', alpha=.4)
+    panels[0,0].set(title='Smooth low-loss turnover; exact power-law tail', xlabel='Energy loss (eV)', ylabel='Probability density (1/eV)')
+    window = (energy >= 300) & (energy < 700)
+    for index in (0, 2, 3):
+        label = f't={thickness[index]:.1f} nm'
+        panels[0,1].semilogy(energy, np.maximum(spectra[index], 1e-12), color=colors[index], label=label+' + continuum')
+        panels[0,1].semilogy(energy, np.maximum(old_spectra[index], 1e-12), '--', color=colors[index], label=label+' previous')
+        panels[1,0].plot(energy[window], (spectra[index]-old_spectra[index])[window], color=colors[index], label=label)
+    panels[0,1].set(title='Same sphere, dose and edges: background on/off', xlim=(200, 1100), ylim=(1e-8, 1e-3),
+                     xlabel='Energy loss (eV)', ylabel='Probability per 0.5 eV channel')
+    panels[1,0].set(title='Additional continuous pre-edge signal', xlim=(300, 700),
+                     xlabel='Energy loss (eV)', ylabel='Probability difference per channel')
+    panels[1,1].plot(radii, spectra[:, window].sum(axis=1), 'o-', label='With continuum')
+    panels[1,1].plot(radii, old_spectra[:, window].sum(axis=1), 'o--', label='Previous model')
+    panels[1,1].set(title='Center -> edge -> vacuum, same incident dose', xlabel='Distance from sphere center (nm)',
+                     ylabel='Integrated probability, 300-700 eV')
+    for panel in panels.flat:
+        panel.legend(fontsize=8)
+        panel.grid(alpha=.2)
+    comparison.suptitle('Thickness-dependent power-law continuum (synthetic model)')
+    comparison.savefig(directory/'sphere_eels_powerlaw_background.png', dpi=160)
+    print(directory/'sphere_eels_powerlaw_background.png')
 
 
 def main():

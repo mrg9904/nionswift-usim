@@ -165,3 +165,9 @@ HAADF_READ_NOISE_ELECTRONS = 0.5
 STL_EELS_EDGES = ((68, 30), (855, 50), (872, 50))
 STL_EELS_PLASMON_EV = 20.0
 STL_EELS_MEAN_FREE_PATH_NM = 100.0
+
+# Phenomenological continuum: exact E^-r above the low-loss transition.
+# Fractions refer to single inelastic events, not extra detector counts.
+EELS_BACKGROUND_FRACTION = 0.25
+EELS_BACKGROUND_EXPONENT = 2.5
+EELS_BACKGROUND_TRANSITION_EV = 50.0

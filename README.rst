@@ -199,8 +199,35 @@ so coarse dispersion does not lose the ZLP. Exposure/current scale counts;
 energy binning sums them. Moving the energy window does not renormalize its
 signal. Counts beyond the captured energy range are genuinely absent.
 
+The single-event kernel now includes a continuous background in addition to
+plasmons and core edges. Above a configurable low-loss transition E0 its
+density is exactly proportional to ``E^-r``. Below E0 it turns over smoothly
+to zero at E=0, with matching value and first derivative at the transition;
+the power law is not extrapolated into a divergent zero-loss peak.
+Its analytic normalization includes the tail to infinite energy. Finite
+energy windows discard that tail instead of rescaling it into recorded counts.
+
+``SimulationSettings.EELS_BACKGROUND_FRACTION`` defaults to 0.25 of single
+inelastic events, ``EELS_BACKGROUND_EXPONENT`` to 2.5 and
+``EELS_BACKGROUND_TRANSITION_EV`` to 50 eV. These defaults apply to sphere,
+STL and other feature materials; individual ``EELSMaterial`` objects can
+override them. Set the fraction to zero to reproduce the previous kernel.
+Core and background fractions must sum to at most one; the remaining
+probability belongs to plasmons. A background event redistributes an
+electron's energy, rather than adding extra electrons to the detector.
+
+The same thickness-dependent compound-Poisson convolutions act on the
+continuum, plasmons and edges. Background is zero in vacuum, approximately
+linear in thickness for thin specimens, and changes shape under plural
+scattering in thicker specimens. The final mixed spectrum is not globally
+one exact power law: low-loss peaks, edges and plural scattering remain.
+The pre-edge power-law approximation and deterioration of signal/background
+with thickness are described in the manufacturer's EELS references:
+https://eels.info/how/quantification/quantify-extracted-signal and
+https://eels.info/about/advantages/advantage-three .
+
 This remains a phenomenological model: Gaussian plasmons and smooth synthetic
-core edges, default lambda 100 nm and core-event fraction 0.03. It does not
+core edges and a normalized continuum, default lambda 100 nm and core-event fraction 0.03. It does not
 calculate material cross sections, ELNES, elastic/aperture losses, energy- or
 voltage-dependent mean free paths, channeling or a finite convergent probe.
 A mesh carries no chemistry. ``STL_EELS_EDGES``, ``STL_EELS_PLASMON_EV`` and
@@ -211,7 +238,8 @@ for testing geometric thickness trends, not quantitative material analysis.
 
 EELS shot noise samples actual electrons per channel using camera gain. The
 simulator frame includes ``eels_simulation`` metadata with local thickness,
-optical depth, ideal zero-loss fraction and detector-window fraction. Device
+optical depth, ideal zero-loss fraction, detector-window fraction, background
+event optical depth/probability and each layer's continuum parameters. Device
 record/sequence properties retain this snapshot; the installed Nion live
 bridge may discard custom frame metadata. Spectrum images must not interpret
 a single final-frame snapshot as a spatial thickness map.
@@ -237,6 +265,9 @@ native DLL search paths are available)::
     python tools/preview_eels_thickness.py --render-only
 
 Outputs are local and ignored under ``tools/eels_thickness_results/``.
+``sphere_eels_powerlaw_background.png`` compares the original and new sphere
+spectra at the same dose and checks the single-event log-log tail slope.
+The NPZ includes both spectra and the isolated continuum density.
 
 
 Sample-specific initial views
