@@ -17,9 +17,7 @@ FOCUS_STEP_NM = 1.0
 # Change this to -1.0 if the wheel direction feels reversed on your system.
 FOCUS_WHEEL_DIRECTION = 1.0
 
-# Safety limits for interactive focus adjustment.
-MINIMUM_FOCUS_NM = -1000.0
-MAXIMUM_FOCUS_NM = 1000.0
+# Focus has no artificial keyboard/wheel range limit.
 
 
 # ----------------------------------------------------------------------
@@ -48,7 +46,11 @@ STAGE_Y_DIRECTION = 1.0
 
 ENABLE_KEYBOARD_CONTROLS = True
 
-# Keys are case-insensitive; only tilt keys accept Shift to reverse direction.
+# Ctrl selects coarse steps; Ctrl+Shift selects fine steps.
+COARSE_STEP_MULTIPLIER = 10.0
+FINE_STEP_MULTIPLIER = 0.1
+
+# Letter keys are case-insensitive; brightness/contrast accept Shift.
 FOV_DECREASE_KEY = "r"
 FOV_INCREASE_KEY = "e"
 DEFOCUS_DECREASE_KEY = "d"
@@ -67,7 +69,11 @@ MINIMUM_FOV_NM = 5.0
 # HAADF focus model. A 1 nm change is usually too small to see, so use 10 nm.
 DEFOCUS_STEP_NM = 10.0
 
-# T changes TX, Y changes TY. Shift reverses either direction.
-TILT_X_KEY = "t"
-TILT_Y_KEY = "y"
+# Arrow keys: Up TY+, Down TY-, Left TX-, Right TX+.
 TILT_STEP_DEG = 0.1
+
+# B controls brightness; C controls contrast. Shift reverses either key.
+BRIGHTNESS_KEY = "b"
+CONTRAST_KEY = "c"
+BRIGHTNESS_STEP = 0.05
+CONTRAST_FACTOR = 1.1

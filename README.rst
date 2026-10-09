@@ -366,9 +366,14 @@ Interactive microscope controls work while the **uSim HAADF scan** or
 **uSim Ronchigram Camera** display has focus:
 
 - ``D`` / ``F`` decrease/increase defocus by 10 nm; the mouse wheel changes it by 1 nm.
-- ``T`` increases stage TX, ``Y`` increases TY, by 0.1 degrees. ``Shift+T``
-  and ``Shift+Y`` decrease the corresponding tilt. The instrument panel's
+  There is no +/-1000 nm limit. Each adjustment continues from the current
+  manual setting, including an effective C10Control offset.
+- Arrow keys change stage tilt by 0.1 degrees: Up increases TY, Down decreases
+  TY, Left decreases TX and Right increases TX. The instrument panel's
   TX/TY fields show the same values and the Kikuchi orientation updates live.
+  STL specimens also rotate geometrically: projected outline, beam thickness
+  and depth-dependent HAADF focus change. SingleCathodeOnCarbon rotates about
+  its prism center, using the same rotation convention as crystal diffraction.
 - Double-click with the pointer tool to move the specimen point to the image
   centre. HAADF uses scan FoV/rotation; Ronchigram uses the actual aberration
   ray mapping, including negative defocus and astigmatism. A focused image
@@ -376,17 +381,38 @@ Interactive microscope controls work while the **uSim HAADF scan** or
   after changing optics before using Ronchigram double-click positioning.
 - ``R`` / ``E`` decrease/increase the selected HAADF scan profile's FoV from
   either display. They do not change the camera angular calibration.
+- ``B`` increases display brightness by 0.05; ``C`` multiplies contrast by
+  1.1. ``Shift+B`` decreases brightness and ``Shift+C`` divides contrast by
+  1.1. Both work from the HAADF and Ronchigram displays. The uSim Scan Control
+  panel includes editable Brightness/Contrast fields for the selected profile;
+  Fast/Slow/Record retain their own values. The display transfer changes only
+  visualization; acquisition arrays and EELS counts are preserved.
 
 Steps and directions are configurable in
 ``nionswift_plugin/usim/InteractiveControlSettings.py``. Ctrl/Alt/Meta shortcuts,
 modified double-clicks and unrelated data displays retain their normal behavior.
+For keyboard focus (D/F), tilt (arrows) and FoV (R/E), Ctrl selects a 10-times
+coarse step and Ctrl+Shift selects a 0.1-times fine step. Focus steps are
+10/100/1 nm and tilt steps are 0.1/1/0.01 degrees for normal/coarse/fine.
+FoV uses the normal zoom factor raised to the step multiplier, preserving
+reciprocal zoom directions. Ctrl+brightness/contrast shortcuts are unchanged.
+
+Tilt updates project only mesh triangles intersecting the current field of view,
+while retaining the original rotated geometry. With CUDA available, cathode
+depth layers, batched focus transforms and Kikuchi line rendering/interpolation
+run on the GPU. CPU rendering remains available without CUDA. Blur banks are
+created at the actual specimen thickness instead of being built twice.
+``python tools/benchmark_cathode_tilt.py --size 512 --steps 3`` measures warmed
+tilt computation independently of UI refresh and exposure time; use ``--size
+1024`` to measure a larger frame.
 
 Sample-specific initial views
 -----------------------------
 
 On startup and each specimen change, the ten-particle **STL Depth Sample** uses
-stage x=1222 nm, y=279 nm and FoV 10000 nm. Every other sample starts at stage
-(0, 0) with FoV 200 nm. Fast/Slow/Record profiles and scan center are updated
+stage x=1222 nm, y=279 nm and FoV 10000 nm. Other samples use FoV 200 nm,
+at stage (0, 0) except SingleCathodeOnCarbon, which centers its prism.
+Fast/Slow/Record profiles and scan center are updated
 on selection, while pixel sizes and dwell times remain as configured.
 Re-selecting the already active sample does not reset a manually adjusted view.
 
@@ -423,3 +449,28 @@ uniform carbon patch can give an almost uniform Ronchigram: the 5 nm film has
 about 3.3 percent transmission contrast under the default 150 nm attenuation
 length. Defocus of 10000--50000 nm reveals progressively wider areas of the
 film; these values represent 10--50 um, not 10--50 nm.
+
+SingleCathodeOnCarbon
+---------------------
+
+Select **SingleCathodeOnCarbon** to load the smooth film/copper support with
+the tilted regular hexagonal prism. Fast, Slow and Record profiles start at
+the prism's geometric center projected into XY, with FoV 200 nm. uSim uses
+sample_position = scan_center - stage_offset, so the displayed stage values
+have the opposite sign to the recorded STL position.
+
+The prism uses the same ``NNMTO_pristine.cif`` as Spherical Particle. Its
+crystal [001] direction is aligned with the prism base normal, including the
+recorded tilt and in-plane spin; stage TX/TY then rotate this crystal frame.
+The recorded [49,72,83] describes the base normal in sample Cartesian XYZ,
+not a CIF lattice direction. The carbon film remains amorphous. Ronchigram
+composes only the prism's Kikuchi bands with the full support transmission.
+HAADF and EELS sum the carbon and prism material thickness separately and
+exclude the vacuum gap under the tilted base. EELS continues to use synthetic
+material spectra rather than CIF-based scattering cross sections.
+
+The three STL variants and packaged orientation record ``single_cathode.json``
+are in ``nion/usim_device/samples/``. ``tools/create_hexagonal_prism.py``
+generates new randomized geometry and matching metadata; ``--seed`` reproduces
+a realization. Image previews and a readable geometry record are saved in
+``tools/samples/hexagonal_prism/``. Restart uSim after regenerating a model.

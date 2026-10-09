@@ -8,8 +8,10 @@ R / E
     Decrease / increase the current scan field of view.
 D / F
     Decrease / increase the instrument defocus.
-T / Y (Shift reverses direction)
+Arrow keys (Up/Down: TY +/-; Left/Right: TX -/+)
     Increase stage TX / TY by the configured degree step.
+B / C (Shift reverses direction)
+    Increase selected-profile display brightness / contrast.
 
 Nion Swift 16.16.2 exposes display-panel key events, but it does not expose
 image mouse-wheel or image double-click events to plug-ins. This module hooks
@@ -266,7 +268,7 @@ class InteractiveControlManager:
         display_panel: typing.Any,
         key: UserInterface.Key,
     ) -> bool:
-        """Handle E/R scan FoV, D/F focus and T/Y tilt in either display."""
+        """Handle FoV, focus, tilt and display tone in either display."""
 
         if not InteractiveControlSettings.INTERACTIVE_CONTROLS_ENABLED:
             return False
@@ -276,27 +278,55 @@ class InteractiveControlManager:
             return False
 
         modifiers = key.modifiers
-        if modifiers.control or modifiers.alt or getattr(modifiers, "meta", False):
+        if modifiers.alt or getattr(modifiers, "meta", False):
             return False
 
         key_text = (key.text or "").lower()
-        if key_text in (InteractiveControlSettings.TILT_X_KEY, InteractiveControlSettings.TILT_Y_KEY):
+        # Qt may supply a control character instead of a letter for Ctrl keys.
+        if modifiers.control and isinstance(key.key, int) and 65 <= key.key <= 90:
+            key_text = chr(key.key).lower()
+        step_multiplier = (InteractiveControlSettings.FINE_STEP_MULTIPLIER if modifiers.shift
+                           else InteractiveControlSettings.COARSE_STEP_MULTIPLIER) if modifiers.control else 1.0
+        if key_text in (InteractiveControlSettings.BRIGHTNESS_KEY, InteractiveControlSettings.CONTRAST_KEY):
+            if modifiers.control:
+                return False
+            from . import ScanProfileControls
+            source = self.__scan_hardware_source
+            if source is None:
+                return False
+            index = source.selected_profile_index
+            parameters = source.get_frame_parameters(index)
+            brightness, contrast = ScanProfileControls.get_tone(parameters)
+            if key_text == InteractiveControlSettings.BRIGHTNESS_KEY:
+                brightness += InteractiveControlSettings.BRIGHTNESS_STEP * (-1 if modifiers.shift else 1)
+            else:
+                contrast *= InteractiveControlSettings.CONTRAST_FACTOR ** (-1 if modifiers.shift else 1)
+            ScanProfileControls.set_tone(parameters, brightness, contrast)
+            source.set_frame_parameters(index, parameters)
+            ScanProfileControls.apply_to_document(getattr(display_panel, 'document_controller', None), source, parameters)
+            channel = getattr(getattr(display_panel, 'display_item', None), 'display_data_channel', None)
+            if channel is not None:
+                channel.brightness, channel.contrast = brightness, contrast
+            return True
+        tilt_x_direction = int(key.is_right_arrow) - int(key.is_left_arrow)
+        tilt_y_direction = int(key.is_up_arrow) - int(key.is_down_arrow)
+        if (tilt_x_direction or tilt_y_direction) and (not modifiers.shift or modifiers.control):
             tilt = self.__instrument.get_value_2d("stage_tilt_rad")
-            delta = math.radians(InteractiveControlSettings.TILT_STEP_DEG) * (-1 if modifiers.shift else 1)
-            new_tilt = Geometry.FloatPoint(y=tilt.y + (delta if key_text == InteractiveControlSettings.TILT_Y_KEY else 0),
-                                          x=tilt.x + (delta if key_text == InteractiveControlSettings.TILT_X_KEY else 0))
+            delta = math.radians(InteractiveControlSettings.TILT_STEP_DEG) * step_multiplier
+            new_tilt = Geometry.FloatPoint(y=tilt.y + delta * tilt_y_direction,
+                                          x=tilt.x + delta * tilt_x_direction)
             return bool(self.__instrument.set_value_2d("stage_tilt_rad", new_tilt))
-        if modifiers.shift:
+        if modifiers.shift and not modifiers.control:
             return False
 
         if key_text == InteractiveControlSettings.DEFOCUS_DECREASE_KEY:
             return self.__change_defocus(
-                -InteractiveControlSettings.DEFOCUS_STEP_NM
+                -InteractiveControlSettings.DEFOCUS_STEP_NM * step_multiplier
             )
 
         if key_text == InteractiveControlSettings.DEFOCUS_INCREASE_KEY:
             return self.__change_defocus(
-                InteractiveControlSettings.DEFOCUS_STEP_NM
+                InteractiveControlSettings.DEFOCUS_STEP_NM * step_multiplier
             )
 
         if key_text == InteractiveControlSettings.FOV_DECREASE_KEY:
@@ -306,6 +336,7 @@ class InteractiveControlManager:
         else:
             return False
 
+        factor = factor ** step_multiplier
         scan_hardware_source = self.__scan_hardware_source
         if scan_hardware_source is None:
             return False
@@ -345,13 +376,9 @@ class InteractiveControlManager:
             return False
 
         current_defocus_nm = current_defocus_m * 1e9
-        new_defocus_nm = min(
-            InteractiveControlSettings.MAXIMUM_FOCUS_NM,
-            max(
-                InteractiveControlSettings.MINIMUM_FOCUS_NM,
-                current_defocus_nm + delta_nm,
-            ),
-        )
+        new_defocus_nm = current_defocus_nm + delta_nm
+        if not math.isfinite(new_defocus_nm):
+            return False
 
         if not self.__instrument.SetVal(
             "C10",

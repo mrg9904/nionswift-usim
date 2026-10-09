@@ -1,0 +1,91 @@
+{
+  "seed": 258656728807033636830907815099487689288,
+  "coordinate_unit": "nm",
+  "side_length_nm": 149.0349760804314,
+  "height_along_prism_axis_nm": 219.63377744915618,
+  "film_normal": [
+    0,
+    0,
+    1
+  ],
+  "base_normal_abc": [
+    49,
+    72,
+    83
+  ],
+  "base_normal_unit_xyz": [
+    0.4072881700314424,
+    0.5984642498421194,
+    0.6898962880124433
+  ],
+  "tilt_from_film_normal_deg": 46.37810027350329,
+  "spin_about_prism_axis_deg": 260.9092850212669,
+  "bottom_face_center_nm": [
+    123.3029496121053,
+    -8769.917813260385,
+    111.53251337468801
+  ],
+  "contact_points_nm": [
+    [
+      199.89140484443206,
+      -8699.232197931009,
+      5.0
+    ]
+  ],
+  "film_source_sha256": "7b44609bf612aac8306bb64f819a1b783b941e64e1fbf143b29c42988f753c94",
+  "placement": "Entire XY projection over carbon; lowest point touches film top z=5 nm. Tilted base is not flush.",
+  "direction_convention": "[abc] is Cartesian in sample XYZ; no CIF/lattice is assigned.",
+  "models": {
+    "hexagonal_prism.stl": {
+      "watertight": true,
+      "faces": 20,
+      "bounds_nm": [
+        [
+          -12.437880516052246,
+          -8888.595703125,
+          5.0
+        ],
+        [
+          348.4980163574219,
+          -8519.796875,
+          369.5895690917969
+        ]
+      ],
+      "volume_nm3": 12674394.908063313
+    },
+    "hexagonal_prism_on_lacey_carbon.stl": {
+      "watertight": true,
+      "faces": 143124,
+      "bounds_nm": [
+        [
+          -27000.0,
+          -27000.0,
+          0.0
+        ],
+        [
+          27000.0,
+          27000.0,
+          369.5895690917969
+        ]
+      ],
+      "volume_nm3": 3370059884.605868
+    },
+    "hexagonal_prism_on_lacey_carbon_with_copper_grid.stl": {
+      "watertight": true,
+      "faces": 143156,
+      "bounds_nm": [
+        [
+          -50000.0,
+          -50000.0,
+          0.0
+        ],
+        [
+          50000.0,
+          50000.0,
+          10000.0
+        ]
+      ],
+      "volume_nm3": 70843370059884.61
+    }
+  }
+}

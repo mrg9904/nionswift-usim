@@ -18,6 +18,7 @@ from nion.usim_device import CameraSimulator
 from nion.usim_device import InstrumentDevice as InstrumentDevice_
 from nion.usim_device import SampleSimulator
 from nion.usim_device import Noise
+from nion.usim_device import SampleGeometry
 from nion.utils import Geometry
 
 
@@ -60,7 +61,7 @@ def plot_spectrum(feature: SampleSimulator.Feature, data: _NDArray, multiplier: 
 class EELSCameraSimulator(CameraSimulator.CameraSimulator):
     depends_on = ["is_slit_in", "probe_state", "probe_position", "is_blanked", "ZLPoffset",
                   "stage_position_m", "beam_shift_m", "features", "energy_offset_eV", "energy_per_channel_eV",
-                  "BeamCurrent"]
+                  "BeamCurrent", "stage_tilt_rad"]
 
     def __init__(self, instrument: InstrumentDevice_.Instrument, sensor_dimensions: Geometry.IntSize, counts_per_electron: int) -> None:
         super().__init__(instrument, "eels", sensor_dimensions, counts_per_electron)
@@ -91,6 +92,7 @@ class EELSCameraSimulator(CameraSimulator.CameraSimulator):
                     scan_context.center_nm or Geometry.FloatPoint(),
                     frame_settings.current_probe_position, scan_context.rotation_rad)
                 generator = typing.cast(InstrumentDevice_.ScanDataGenerator, self.instrument.scan_data_generator)
+                SampleGeometry.prepare_sample(generator.sample, self.instrument)
                 layers = generator.sample.eels_layers_at(position)
                 calibration = dimensional_calibrations[1]
                 energies = calibration.offset + numpy.arange(data.shape[1]) * calibration.scale

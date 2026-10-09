@@ -22,6 +22,19 @@ from nion.utils import Validator
 _ = gettext.gettext
 
 
+class SampleSelectionConverter:
+    """Map filtered dropdown positions to stable simulator sample indices."""
+
+    def __init__(self, indices: typing.Tuple[int, ...]) -> None:
+        self.indices = indices
+
+    def convert(self, value: int) -> typing.Optional[int]:
+        return self.indices.index(value) if value in self.indices else None
+
+    def convert_back(self, value: typing.Optional[int]) -> typing.Optional[int]:
+        return self.indices[value] if value is not None and 0 <= value < len(self.indices) else None
+
+
 class Control2DBinding(Binding.Binding):
     def __init__(self, value_manager: InstrumentDevice_.ValueManager, control_name: str, attribute_name: str,
                  converter: typing.Optional[Converter.ConverterLike[typing.Any, typing.Any]] = None,
@@ -127,9 +140,11 @@ class InstrumentWidget(Widgets.CompositeWidgetBase):
 
         scan_data_generator = typing.cast(InstrumentDevice_.ScanDataGenerator, instrument.scan_data_generator)
 
-        sample_combo_box = ui.create_combo_box_widget(scan_data_generator.sample_titles)
-        sample_combo_box.current_index = scan_data_generator.sample_index
-        sample_combo_box.bind_current_index(Binding.PropertyBinding(scan_data_generator, "sample_index"))
+        sample_indices = scan_data_generator.selectable_sample_indices
+        selection_converter = SampleSelectionConverter(sample_indices)
+        sample_combo_box = ui.create_combo_box_widget([scan_data_generator.sample_titles[index] for index in sample_indices])
+        sample_combo_box.current_index = selection_converter.convert(scan_data_generator.sample_index)
+        sample_combo_box.bind_current_index(Binding.PropertyBinding(scan_data_generator, "sample_index", converter=selection_converter))
 
         voltage_field = ui.create_line_edit_widget()
         voltage_field.bind_text(Binding.PropertyBinding(instrument, "voltage", converter=Converter.PhysicalValueToStringConverter(units="keV", multiplier=1E-3)))

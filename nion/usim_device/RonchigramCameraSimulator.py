@@ -19,6 +19,7 @@ from nion.usim_device import EELSModel
 from nion.usim_device import KikuchiModel
 from nion.usim_device import RonchigramContrast
 from nion.usim_device import SampleSimulator
+from nion.usim_device import SampleGeometry
 from nion.usim_device import LaceyCarbonSample
 from nion.usim_device import SimulationSettings
 from nion.usim_device import InstrumentDevice as InstrumentDevice_
@@ -361,8 +362,11 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         self.__contrast_composer = None
         self.__source_key = None
         self.__source_data = None
+        self.__line_renderer = None
+        self.__line_renderer_failed = False
 
     def close(self) -> None:
+        self.__line_renderer = None
         self.__contrast_composer = None
         self.__kikuchi_pattern = None
         self.__source_data = None
@@ -371,9 +375,10 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         self.noise.clear_gpu_cache()
         super().close()
 
-    def _source_image(self, readout_area, binning_shape):
+    def _source_image(self, readout_area, binning_shape, *, crystalline=False):
         """Cache the sphere projection independently of probe/tilt/defocus."""
         sample = self.instrument.scan_data_generator.sample
+        SampleGeometry.prepare_sample(sample, self.instrument)
         offset_m = self.instrument.stage_position_m
         sphere = isinstance(sample, SampleSimulator.SphericalParticleSample)
         lacey = isinstance(sample, LaceyCarbonSample.LaceyCarbonSample)
@@ -387,8 +392,8 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                          for f in sample.features))
             if key == self.__source_key and self.__source_data is not None:
                 return self.__source_data
-        elif lacey:
-            key = (id(sample), offset_m.y, offset_m.x, self.__source_fov_nm, readout_area.as_tuple(),
+        elif lacey and not crystalline:
+            key = (id(sample), sample.stage_tilt_rad.as_tuple(), offset_m.y, offset_m.x, self.__source_fov_nm, readout_area.as_tuple(),
                    binning_shape.as_tuple(), SimulationSettings.RONCHIGRAM_TRANSMISSION_LENGTH_NM)
             if key == self.__source_key and self.__source_data is not None:
                 return self.__source_data
@@ -399,14 +404,16 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         center_nm = Geometry.FloatPoint(full_fov_nm*(readout_area.center.y/self._sensor_dimensions.height-.5),
                                        full_fov_nm*(readout_area.center.x/self._sensor_dimensions.width-.5))
         data = numpy.zeros((height, width), numpy.float32)
-        sample.plot_features(data, offset_m, fov_size_nm, Geometry.FloatPoint(), center_nm, Geometry.IntSize(height, width))
+        plot = sample.plot_crystal_features if crystalline else sample.plot_features
+        plot(data, offset_m, fov_size_nm, Geometry.FloatPoint(), center_nm, Geometry.IntSize(height, width))
         if sphere:
             data = 100*KikuchiModel.transmission(data*sample.features[0].reference_thickness_nm)
         else:
             data = 100-data
         data = self._get_binned_data(data, binning_shape)
-        self.__source_key = key
-        self.__source_data = data if sphere or lacey else None
+        if not crystalline:
+            self.__source_key = key
+            self.__source_data = data if sphere or lacey else None
         return data
 
     def stage_displacement_for_pixel(self, position, image_shape):
@@ -424,15 +431,23 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             y=displacement.y*self.__source_fov_nm*area.height/self._sensor_dimensions.height*1e-9,
             x=displacement.x*self.__source_fov_nm*area.width/self._sensor_dimensions.width*1e-9)
 
-    def _apply_kikuchi(self, data, readout_area, binning_shape, frame_settings, scan_context):
+    def _apply_kikuchi(self, data, readout_area, binning_shape, frame_settings, scan_context, aberrations=None):
         sample = self.instrument.scan_data_generator.sample
-        if not isinstance(sample, SampleSimulator.SphericalParticleSample):
+        if not getattr(sample, 'crystal_cif_path', None):
             return data, {}
         manager = typing.cast(InstrumentDevice_.ValueManager, self.instrument.value_manager)
         position = EELSModel.probe_sample_position(manager.actual_offset_m,
             scan_context.fov_size_nm or Geometry.FloatSize(), scan_context.center_nm or Geometry.FloatPoint(),
             frame_settings.current_probe_position or Geometry.FloatPoint(.5, .5), scan_context.rotation_rad)
-        thickness_nm = sum(feature.thickness_at(position) for feature in sample.features)
+        composite = hasattr(sample, 'plot_crystal_features')
+        thickness_nm = (sample.crystal_thickness_at(position) if composite else
+            sum(feature.thickness_at(position) for feature in sample.features))
+        crystal_data = data
+        if composite:
+            source = self._source_image(readout_area, binning_shape, crystalline=True)
+            crystal_data = self.__aberrations_controller.apply(aberrations, source)
+        sample_rotation = getattr(sample, 'crystal_rotation', None)
+        rotation_key = tuple(numpy.asarray(sample_rotation).ravel()) if sample_rotation is not None else ()
         tilt = self.instrument.GetVal2D('stage_tilt_rad')
         voltage = self.instrument.GetVal('EHT')
         convergence = self.instrument.GetVal('ConvergenceAngle')
@@ -442,16 +457,19 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             'stage_tilt_rad': {'tx': tilt.x, 'ty': tilt.y},
             'probe_position_sample_m': {'x': position.x, 'y': position.y}, 'band_count': 0}
         metadata['d_min_angstrom'] = SimulationSettings.KIKUCHI_D_MIN_ANGSTROM
+        if composite:
+            metadata['crystal_rotation_matrix'] = numpy.asarray(sample_rotation).tolist()
+            metadata['crystal_001_direction_xyz'] = numpy.asarray(sample_rotation)[:, 2].tolist()
         # The parked position is the beam centre, not the whole illuminated
         # region. Defocused/aberrated rays can cross the crystal even when
         # this centre is in vacuum. Use the projected transmission footprint.
         vacuum_level = 100*binning_shape.height*binning_shape.width
-        if not bool(((data > 0) & (data < vacuum_level-1e-4)).any()):
+        if not bool(((crystal_data > 0) & (crystal_data < vacuum_level-1e-4)).any()):
             return data, metadata
         calibrations = self.get_dimensional_calibrations(readout_area, binning_shape)
         y_rad = calibrations[0].offset + numpy.arange(data.shape[0])*calibrations[0].scale
         x_rad = calibrations[1].offset + numpy.arange(data.shape[1])*calibrations[1].scale
-        key = (sample.crystal_cif_path, tuple(sample.zone_axis), voltage, tilt.x, tilt.y,
+        key = (sample.crystal_cif_path, tuple(sample.zone_axis), rotation_key, voltage, tilt.x, tilt.y,
                tuple(data.shape), tuple((c.offset, c.scale) for c in calibrations),
                SimulationSettings.KIKUCHI_D_MIN_ANGSTROM, SimulationSettings.KIKUCHI_MAX_BANDS,
                SimulationSettings.RONCHIGRAM_BACKEND,
@@ -462,12 +480,24 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             visible = KikuchiModel.bands(crystal, voltage, tuple(sample.zone_axis), tilt.x, tilt.y,
                 max_angle_rad=math.atan(math.hypot(math.tan(max(abs(x_rad))), math.tan(max(abs(y_rad))))),
                 d_min_angstrom=SimulationSettings.KIKUCHI_D_MIN_ANGSTROM,
-                max_bands=SimulationSettings.KIKUCHI_MAX_BANDS)
+                max_bands=SimulationSettings.KIKUCHI_MAX_BANDS, sample_rotation=sample_rotation)
             # Bound interactive raster work. Width is >=0.35 mrad; a 512 grid
             # resolves it at the default camera angle, then interpolate to readout.
             height, width = min(512, data.shape[0]), min(512, data.shape[1])
-            pattern = KikuchiModel.render_lines(visible,
-                numpy.linspace(x_rad[0], x_rad[-1], width), numpy.linspace(y_rad[0], y_rad[-1], height))
+            grid_x, grid_y = numpy.linspace(x_rad[0], x_rad[-1], width), numpy.linspace(y_rad[0], y_rad[-1], height)
+            pattern = None
+            use_gpu = (SimulationSettings.RONCHIGRAM_BACKEND == 'gpu' or
+                (SimulationSettings.RONCHIGRAM_BACKEND == 'auto' and data.size >= SimulationSettings.RONCHIGRAM_GPU_MINIMUM_PIXELS))
+            if use_gpu and not self.__line_renderer_failed:
+                try:
+                    if self.__line_renderer is None:
+                        self.__line_renderer = RonchigramContrast.GPULineRenderer()
+                    pattern = self.__line_renderer.render(visible, grid_x, grid_y, output_shape=data.shape)
+                except Exception as error:
+                    self.__line_renderer_failed = True
+                    logging.warning('Ronchigram CUDA line renderer unavailable; using CPU: %s', error)
+            if pattern is None:
+                pattern = KikuchiModel.render_lines(visible, grid_x, grid_y)
             if pattern.shape != data.shape:
                 yy, xx = numpy.meshgrid(numpy.linspace(0, height-1, data.shape[0]),
                     numpy.linspace(0, width-1, data.shape[1]), indexing='ij')
@@ -479,7 +509,16 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                 (calibrations[0].scale, calibrations[1].scale), SimulationSettings.RONCHIGRAM_BACKEND)
             self.__kikuchi_cache_key = key
         pattern, metadata['band_count'] = self.__kikuchi_pattern
-        data, contrast_metadata = self.__contrast_composer.compose(data, vacuum_level)
+        composed, contrast_metadata = self.__contrast_composer.compose(crystal_data, vacuum_level)
+        if composite:
+            xp = self.__contrast_composer.xp
+            real = xp.asarray(data) if xp is not numpy or isinstance(data, numpy.ndarray) else data.get()
+            crystal_real = xp.asarray(crystal_data) if xp is not numpy or isinstance(crystal_data, numpy.ndarray) else crystal_data.get()
+            # Only the crystal produces Kikuchi bands. Carbon/copper still
+            # attenuate rays, but must not masquerade as crystalline material.
+            data = xp.asarray(composed) * xp.where(crystal_real > 0, real/xp.maximum(crystal_real, 1e-12), 0.)
+        else:
+            data = composed
         metadata.update(contrast_metadata)
         metadata['probe_diffusion_sigma_rad'] = float(KikuchiModel.diffusion_sigma_rad(thickness_nm))
         return data, metadata
@@ -518,7 +557,9 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
     def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: stem_controller.ScanContext, parked_probe_position: typing.Optional[Geometry.FloatPoint]) -> DataAndMetadata.DataAndMetadata:
         frame_settings = self._get_frame_settings(readout_area, binning_shape, exposure_s, scan_context, parked_probe_position)
         sample = self.instrument.scan_data_generator.sample
-        crystal_settings = (getattr(sample, 'crystal_cif_path', None), tuple(getattr(sample, 'zone_axis', ())))
+        rotation = getattr(sample, 'crystal_rotation', None)
+        crystal_settings = (getattr(sample, 'crystal_cif_path', None), tuple(getattr(sample, 'zone_axis', ())),
+                            tuple(numpy.asarray(rotation).ravel()) if rotation is not None else ())
         if crystal_settings != self.__crystal_settings:
             self._needs_recalculation = True
             self.__crystal_settings = crystal_settings
@@ -578,7 +619,7 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                 aberrations["c34a"] = self.instrument.GetVal2D("C34Control").x
                 aberrations["c34b"] = self.instrument.GetVal2D("C34Control").y
                 data = self.__aberrations_controller.apply(aberrations, data)
-                data, metadata = self._apply_kikuchi(data, readout_area, binning_shape, frame_settings, scan_context)
+                data, metadata = self._apply_kikuchi(data, readout_area, binning_shape, frame_settings, scan_context, aberrations)
                 if not isinstance(data, numpy.ndarray):
                     # Vacuum/non-crystalline frames bypass the compositor.
                     data = data.get()

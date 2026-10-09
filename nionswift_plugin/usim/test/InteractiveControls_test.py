@@ -43,6 +43,34 @@ class TestInteractiveControls(unittest.TestCase):
     def capture(self):
         return self.camera.get_frame_data(self.area, Geometry.IntSize(1, 1), .1, self.context, Geometry.FloatPoint(.5, .5))
 
+    def test_focus_is_unlimited_and_continues_from_manual_raw_or_effective_value(self):
+        panel = self.panel('usim_scan')
+        self.manager.set_value('C10', 20000e-9)
+        self.assertTrue(self.controls.handle_key_pressed(panel, self.key('f')))
+        self.assertAlmostEqual(self.manager.get_value('C10'), 20010e-9)
+        self.manager.set_value('C10Control', -30000e-9)
+        self.assertTrue(self.controls.handle_key_pressed(panel, self.key('d')))
+        self.assertAlmostEqual(self.manager.get_value('C10Control'), -30010e-9)
+        self.assertTrue(self.controls.handle_mouse_wheel(SimpleNamespace(delegate=panel), 0, 120, False))
+        self.assertAlmostEqual(self.manager.get_value('C10Control'), -30009e-9)
+
+    def test_brightness_contrast_shift_reverse_and_other_shortcuts_are_ignored(self):
+        from nionswift_plugin.usim import ScanProfileControls
+        for source in ('usim_scan', 'usim_ronchigram_camera'):
+            panel = self.panel(source)
+            brightness, contrast = ScanProfileControls.get_tone(self.parameters)
+            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('b')))
+            np.testing.assert_allclose(ScanProfileControls.get_tone(self.parameters), (brightness+.05, contrast), atol=1e-12)
+            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('c')))
+            after_brightness, after_contrast = ScanProfileControls.get_tone(self.parameters)
+            self.assertAlmostEqual(after_brightness, brightness+.05)
+            self.assertAlmostEqual(after_contrast, contrast*1.1)
+            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('B', shift=True)))
+            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('C', shift=True)))
+            np.testing.assert_allclose(ScanProfileControls.get_tone(self.parameters), (brightness, contrast), atol=1e-12)
+            self.assertFalse(self.controls.handle_key_pressed(panel, self.key('b', control=True)))
+        self.assertFalse(self.controls.handle_key_pressed(self.panel('usim_eels_camera'), self.key('b')))
+
     def test_focus_wheel_and_keys_in_both_displays_and_unrelated_data_ignored(self):
         for source in ('usim_scan', 'usim_ronchigram_camera'):
             panel = self.panel(source)
@@ -67,32 +95,65 @@ class TestInteractiveControls(unittest.TestCase):
             try:
                 for source in ('usim_scan', 'usim_ronchigram_camera'):
                     panel = self.panel(source)
-                    self.assertTrue(DisplayPanel.DisplayPanel._handle_key_pressed(panel, self.key('t')))
+                    self.assertTrue(DisplayPanel.DisplayPanel._handle_key_pressed(panel, self.key('right')))
                     self.assertTrue(DisplayPanel.DisplayPanel._handle_key_pressed(panel, self.key('f')))
                 original.assert_not_called()
-                self.assertFalse(DisplayPanel.DisplayPanel._handle_key_pressed(self.panel('other_camera'), self.key('t')))
+                self.assertFalse(DisplayPanel.DisplayPanel._handle_key_pressed(self.panel('other_camera'), self.key('right')))
                 original.assert_called_once()
             finally:
                 InteractiveControls.stop()
             self.assertIs(DisplayPanel.DisplayPanel._handle_key_pressed, original)
 
-    def test_tilt_keys_change_separate_axes_and_shift_reverses_them(self):
+    def test_arrow_keys_change_separate_tilt_axes_in_both_displays(self):
         for source in ('usim_scan', 'usim_ronchigram_camera'):
             panel = self.panel(source)
             self.manager.set_value_2d('stage_tilt_rad', Geometry.FloatPoint())
             baseline = self.capture()
-            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('t')))
+            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('right')))
             self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').x, math.radians(.1))
             self.assertEqual(self.manager.get_value_2d('stage_tilt_rad').y, 0)
             tilted = self.capture()
             self.assertGreater(np.max(np.abs(tilted.data-baseline.data)), 1)
-            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('y')))
+            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('up')))
             self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').y, math.radians(.1))
-            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('T', shift=True)))
-            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('Y', shift=True)))
+            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('left')))
+            self.assertTrue(self.controls.handle_key_pressed(panel, self.key('down')))
             self.assertEqual(self.manager.get_value_2d('stage_tilt_rad'), Geometry.FloatPoint())
-            self.assertFalse(self.controls.handle_key_pressed(panel, self.key('t', control=True)))
+            self.assertFalse(self.controls.handle_key_pressed(panel, self.key('up', shift=True)))
+            self.assertFalse(self.controls.handle_key_pressed(panel, self.key('t')))
+            self.assertFalse(self.controls.handle_key_pressed(panel, self.key('y')))
             self.assertFalse(self.controls.handle_key_pressed(panel, self.key('f', shift=True)))
+
+    def test_coarse_and_fine_focus_tilt_and_fov_in_both_displays(self):
+        for source in ('usim_scan', 'usim_ronchigram_camera'):
+            panel = self.panel(source)
+            for shift, multiplier in ((False, 10.), (True, .1)):
+                initial_focus = self.manager.get_value('C10')
+                self.assertTrue(self.controls.handle_key_pressed(panel, self.key('f', shift=shift, control=True)))
+                self.assertAlmostEqual(self.manager.get_value('C10'), initial_focus+10e-9*multiplier)
+                self.assertTrue(self.controls.handle_key_pressed(panel, self.key('d', shift=shift, control=True)))
+                self.assertAlmostEqual(self.manager.get_value('C10'), initial_focus)
+                self.manager.set_value_2d('stage_tilt_rad', Geometry.FloatPoint())
+                for direction, axis, sign in (('up', 'y', 1), ('down', 'y', -1), ('left', 'x', -1), ('right', 'x', 1)):
+                    before = self.manager.get_value_2d('stage_tilt_rad')
+                    self.assertTrue(self.controls.handle_key_pressed(panel, self.key(direction, shift=shift, control=True)))
+                    after = self.manager.get_value_2d('stage_tilt_rad')
+                    self.assertAlmostEqual(getattr(after, axis)-getattr(before, axis), sign*math.radians(.1)*multiplier)
+                self.parameters.fov_nm = 10000.
+                self.assertTrue(self.controls.handle_key_pressed(panel, self.key('r', shift=shift, control=True)))
+                self.assertAlmostEqual(self.parameters.fov_nm, 10000.*.8**multiplier)
+                self.assertTrue(self.controls.handle_key_pressed(panel, self.key('e', shift=shift, control=True)))
+                self.assertAlmostEqual(self.parameters.fov_nm, 10000.)
+        # Real Qt Ctrl+F can have non-printing text; use its physical key code.
+        class PhysicalKey(TestUI.Key):
+            @property
+            def key(self):
+                return ord('F')
+        key = PhysicalKey('\x06', 'f', CanvasItem.KeyboardModifiers(control=True))
+        before = self.manager.get_value('C10')
+        self.assertTrue(self.controls.handle_key_pressed(self.panel('usim_scan'), key))
+        self.assertAlmostEqual(self.manager.get_value('C10'), before+100e-9)
+        self.assertFalse(self.controls.handle_key_pressed(self.panel('usim_eels_camera'), key))
 
     def test_ronchigram_double_click_uses_aberration_mapping_and_defocus_sign(self):
         panel = self.panel('usim_ronchigram_camera')

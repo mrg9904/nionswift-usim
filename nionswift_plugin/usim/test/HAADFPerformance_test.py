@@ -199,6 +199,7 @@ class TestGPUHAADF(unittest.TestCase):
         import types
         instrument = types.SimpleNamespace(
             value_manager=types.SimpleNamespace(actual_offset_m=Geometry.FloatPoint()),
+            GetVal2D=lambda key: Geometry.FloatPoint(),
             GetVal=lambda key: {"C10Control": 500e-9, "ConvergenceAngle": .04,
                                 "BeamCurrent": 200e-12}[key])
         with mock.patch.object(SimulationSettings, "STL_SURFACE_BACKEND", "gpu"):

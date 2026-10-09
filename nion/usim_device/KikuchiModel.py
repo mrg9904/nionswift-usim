@@ -12,6 +12,8 @@ import numpy as np
 from scipy import constants
 from scipy.ndimage import gaussian_filter
 from nion.usim_device import SimulationSettings
+from nion.usim_device import SampleGeometry
+from nion.utils import Geometry
 
 
 @dataclass(frozen=True)
@@ -61,7 +63,7 @@ def wavelength_angstrom(voltage_v: float) -> float:
     return constants.h / math.sqrt(2*constants.m_e*energy*(1+energy/(2*constants.m_e*constants.c**2))) * 1e10
 
 
-def orientation_matrix(crystal: Crystal, zone_axis=(0, 0, 1), tx_rad=0., ty_rad=0.) -> np.ndarray:
+def orientation_matrix(crystal: Crystal, zone_axis=(0, 0, 1), tx_rad=0., ty_rad=0., *, sample_rotation=None) -> np.ndarray:
     """Align [uvw] with z, projected a with x; active lab tilts R_y(TY) @ R_x(TX)."""
     z = crystal.cell_angstrom @ np.asarray(zone_axis, dtype=float)
     if not np.all(np.isfinite(z)) or np.linalg.norm(z) == 0 or not np.isfinite([tx_rad, ty_rad]).all():
@@ -72,10 +74,14 @@ def orientation_matrix(crystal: Crystal, zone_axis=(0, 0, 1), tx_rad=0., ty_rad=
         x = crystal.cell_angstrom[:, 1] - z*np.dot(z, crystal.cell_angstrom[:, 1])
     x /= np.linalg.norm(x)
     initial = np.stack([x, np.cross(z, x), z])
-    cx, sx, cy, sy = math.cos(tx_rad), math.sin(tx_rad), math.cos(ty_rad), math.sin(ty_rad)
-    rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
-    ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
-    return ry @ rx @ initial
+    if sample_rotation is not None:
+        rotation = np.asarray(sample_rotation, dtype=float)
+        if (rotation.shape != (3, 3) or not np.isfinite(rotation).all() or
+                not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-8) or
+                not np.isclose(np.linalg.det(rotation), 1.)):
+            raise ValueError('Sample rotation must be a proper orthonormal matrix')
+        initial = rotation @ initial
+    return SampleGeometry.stage_rotation(Geometry.FloatPoint(x=tx_rad, y=ty_rad)) @ initial
 
 
 @dataclass(frozen=True)
@@ -108,9 +114,9 @@ def _reflectors(path: str, d_min_angstrom: float):
 
 
 def bands(crystal: Crystal, voltage_v: float, zone_axis=(0, 0, 1), tx_rad=0., ty_rad=0.,
-          max_angle_rad=.1, d_min_angstrom=.75, max_bands=160) -> list[Band]:
+          max_angle_rad=.1, d_min_angstrom=.75, max_bands=160, *, sample_rotation=None) -> list[Band]:
     wavelength = wavelength_angstrom(voltage_v)
-    orientation = orientation_matrix(crystal, zone_axis, tx_rad, ty_rad)
+    orientation = orientation_matrix(crystal, zone_axis, tx_rad, ty_rad, sample_rotation=sample_rotation)
     visible = []
     for hkl, normal, spacing, strength in _reflectors(crystal.source, d_min_angstrom):
         sin_b = wavelength/(2*spacing)

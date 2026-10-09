@@ -14,6 +14,8 @@ from nion.usim_device import SampleSimulator
 from nion.usim_device import SimulationSettings
 from nion.usim_device import SurfaceRasterizer
 from nion.usim_device import HAADFFocusModel
+from nion.usim_device import SampleGeometry
+from nion.usim_device import TiltedSurfaceRasterizer
 from nion.utils import Geometry
 
 
@@ -75,6 +77,10 @@ class STLDepthSample(SampleSimulator.Sample):
         )
 
         self.__mesh = mesh
+        self._mesh = mesh  # Composite specimens may split geometry by material.
+        self._untilted_mesh = mesh
+        self._stage_tilt_rad = Geometry.FloatPoint()
+        self._tilted_rasterizer = None
         self.__rasterizer = SurfaceRasterizer.SurfaceRasterizer(mesh.triangles)
 
         # RayMeshIntersector uses an R-tree spatial index to avoid checking
@@ -102,6 +108,30 @@ class STLDepthSample(SampleSimulator.Sample):
 
         self.__depth_cache: typing.Optional[typing.Sequence[typing.Tuple[float, _NDArray]]] = None
         self.__gpu_depth_enabled = True
+
+    @property
+    def stage_tilt_rad(self):
+        return self._stage_tilt_rad
+
+    def set_stage_tilt(self, tilt):
+        if tilt == self._stage_tilt_rad:
+            return
+        mesh = self._untilted_mesh.copy()
+        matrix = numpy.eye(4)
+        matrix[:3, :3] = SampleGeometry.stage_rotation(tilt)
+        mesh.apply_transform(matrix)
+        self._mesh = self.__mesh = mesh
+        if SimulationSettings.STL_USE_SURFACE_RASTERIZER:
+            if self._tilted_rasterizer is None:
+                self._tilted_rasterizer = TiltedSurfaceRasterizer.TiltedSurfaceRasterizer(self._untilted_mesh.triangles, numpy.zeros(3))
+            self._tilted_rasterizer.set_tilt(tilt)
+            self.__rasterizer = self._tilted_rasterizer
+        else:
+            self.__rasterizer = SurfaceRasterizer.SurfaceRasterizer(mesh.triangles)
+        self.__intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+        self.__surface_cache_key = self.__surface_cache = None
+        self.__depth_cache_key = self.__depth_cache = None
+        self._stage_tilt_rad = tilt
 
     @property
     def title(self) -> str:

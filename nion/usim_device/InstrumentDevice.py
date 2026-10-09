@@ -30,6 +30,8 @@ from nion.usim_device import HAADFFocusModel
 from nion.usim_device import SimulationSettings
 from nion.usim_device import STLDepthSample
 from nion.usim_device import LaceyCarbonSample
+from nion.usim_device import SingleCathodeSample
+from nion.usim_device import SampleGeometry
 from nion.usim_device import Noise
 
 _NDArray = numpy.typing.NDArray[typing.Any]
@@ -835,6 +837,7 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
                 self.stage_size_nm
             ),
             LaceyCarbonSample.LaceyCarbonSample(self.stage_size_nm),
+            SingleCathodeSample.SingleCathodeSample(self.stage_size_nm),
         ]
         self.__sample_index = sample_index
 
@@ -845,6 +848,18 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
     @property
     def sample_titles(self) -> typing.List[str]:
         return [sample.title for sample in self.__samples]
+
+    @property
+    def selectable_sample_indices(self) -> typing.Tuple[int, ...]:
+        """Temporarily hide standalone support and block demos from the UI.
+
+        Keep internal sample indices stable for scripts and saved settings.
+        """
+        hidden_types = (SampleSimulator.ThreeHeightBlocksSample,
+                        SampleSimulator.ThreeThicknessBlocksSample,
+                        LaceyCarbonSample.LaceyCarbonSample)
+        return tuple(index for index, sample in enumerate(self.__samples)
+                     if type(sample) not in hidden_types)
 
     @property
     def sample_index(self) -> int:
@@ -860,6 +875,7 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
         self.notify_property_changed("sample_index")
 
     def generate_scan_data(self, instrument: InstrumentDevice.Instrument, scan_frame_parameters: ScanDevice.ScanFrameParameters) -> numpy.typing.NDArray[numpy.float32]:
+        SampleGeometry.prepare_sample(self.sample, instrument)
         size = scan_frame_parameters.size
         fov_size_nm = scan_frame_parameters.fov_size_nm
         rotation = scan_frame_parameters.rotation_rad

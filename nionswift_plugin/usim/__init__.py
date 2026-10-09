@@ -5,6 +5,8 @@ from nionswift_plugin.usim import InstrumentPanel
 
 
 def run() -> None:
+    from nionswift_plugin.usim import ScanProfileControls
+    ScanProfileControls.run()
     # Delayed import prevents a circular import during plug-in initialization.
     from nionswift_plugin.usim.InteractiveControls import (
         run as run_interactive_controls,
@@ -70,6 +72,8 @@ def run() -> None:
 
 
 def stop() -> None:
+    from nionswift_plugin.usim import ScanProfileControls
+    ScanProfileControls.stop()
     from nionswift_plugin.usim.InteractiveControls import (
         stop as stop_interactive_controls,
     )

@@ -32,6 +32,62 @@ class GPUMapper:
                                     order=1, mode="constant", prefilter=False)
 
 
+class GPULineRenderer:
+    """Evaluate all paired Bragg cones in one kernel, reusing it across tilts."""
+    def __init__(self):
+        import cupy as cp
+        if not cp.cuda.runtime.getDeviceCount():
+            raise RuntimeError('No CUDA device available')
+        self.cp = cp
+        self.kernel = cp.RawKernel(r'''
+            extern "C" __global__ void lines(const double* bands, int count,
+                const double* x, const double* y, int width, int height,
+                double line_width, float* output) {
+                int pixel = blockIdx.x * blockDim.x + threadIdx.x;
+                if (pixel >= width*height) return;
+                double a = x[pixel % width], b = y[pixel / width];
+                double norm = sqrt(1+a*a+b*b);
+                float sum = 0;
+                for (int i=0; i<count; ++i) {
+                    const double* band = bands+i*5;
+                    double distance = (band[0]*a+band[1]*b+band[2])/norm;
+                    for (int sign=-1; sign<=1; sign+=2) {
+                        double delta = (distance-sign*band[3])/line_width;
+                        if (fabs(delta)<4) sum = (float)((double)sum+sign*band[4]*exp(-.5*delta*delta));
+                    }
+                }
+                output[pixel] = tanhf(sum);
+            }
+        ''', 'lines', options=('--fmad=false',))
+        self.resize_kernel = cp.RawKernel(r'''
+            extern "C" __global__ void resize_lines(const float* input,
+                int old_width, int old_height, int width, int height, float* output) {
+                int pixel = blockIdx.x*blockDim.x+threadIdx.x;
+                if (pixel>=width*height) return;
+                double x = (double)(pixel%width)*(old_width-1)/max(width-1, 1);
+                double y = (double)(pixel/width)*(old_height-1)/max(height-1, 1);
+                int left = (int)x, top = (int)y;
+                int right = min(left+1, old_width-1), bottom = min(top+1, old_height-1);
+                double a = x-left, b = y-top;
+                output[pixel] = (float)((1-b)*((1-a)*input[top*old_width+left]+a*input[top*old_width+right])
+                    +b*((1-a)*input[bottom*old_width+left]+a*input[bottom*old_width+right]));
+            }
+        ''', 'resize_lines', options=('--fmad=false',))
+
+    def render(self, bands, x_rad, y_rad, line_width=.00035, output_shape=None):
+        cp = self.cp
+        parameters = np.asarray([[*band.normal, np.sin(band.theta_b_rad), band.weight] for band in bands], dtype=np.float64)
+        result = cp.empty((len(y_rad), len(x_rad)), cp.float32)
+        self.kernel(((result.size+255)//256,), (256,), (cp.asarray(parameters), np.int32(len(bands)),
+            cp.asarray(np.tan(x_rad)), cp.asarray(np.tan(y_rad)), np.int32(len(x_rad)), np.int32(len(y_rad)), np.float64(line_width), result))
+        if output_shape is not None and tuple(output_shape) != result.shape:
+            resized = cp.empty(output_shape, cp.float32)
+            self.resize_kernel(((resized.size+255)//256,), (256,), (result,
+                np.int32(result.shape[1]), np.int32(result.shape[0]), np.int32(output_shape[1]), np.int32(output_shape[0]), resized))
+            result = resized
+        return cp.asnumpy(result)
+
+
 class ContrastComposer:
     """Own one pattern's blur bank; moving the probe does not rebuild it.
 
@@ -62,8 +118,8 @@ class ContrastComposer:
                 if not cp.cuda.runtime.getDeviceCount():
                     raise RuntimeError("No CUDA device available")
                 self.xp, self.filter, self.backend = cp, gpu_filter, "gpu"
-                self._prepare(100.)
-                cp.cuda.get_current_stream().synchronize()
+                # Build once at the actual maximum thickness during compose;
+                # a fixed 100 nm prebuild was repeated for thicker cathodes.
             except Exception as error:
                 self._fallback(error)
 

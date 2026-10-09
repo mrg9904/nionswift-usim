@@ -168,3 +168,99 @@ class GPUPreparedDepthPlanes(typing.Sequence[typing.Tuple[float, numpy.typing.ND
         if has_spectrum:
             output += self._fft.idctn(combined, norm="ortho")
         return output if return_device else cp.asnumpy(output)
+
+
+class GPUPreparedLayerPlanes(GPUPreparedDepthPlanes):
+    """One material interval with explicitly bounded, unnormalized depth slices."""
+    def __init__(self, lower, upper, slice_thickness_nm, origin_nm, end_nm, *, normalize=False):
+        super().__init__(lower, upper, slice_thickness_nm)
+        self._normalize = normalize
+        self._reference = 20.
+        self._column_intensity = 1.
+        self._origin = origin_nm
+        self._end = end_nm
+        self._first = 0
+        self._count = max(1, len(numpy.arange(origin_nm, end_nm, slice_thickness_nm)))
+        self._batch_spectra = {}
+
+    def depth(self, index):
+        low = self._origin+index*self._slice
+        return (low+min(low+self._slice, self._end))*.5
+
+    def plane(self, index):
+        low = self._origin+index*self._slice
+        return self._slice_kernel(self._lower, self._upper, low, min(self._slice, self._end-low),
+            self._reference, self._normalize, self._column_intensity)
+
+    def render(self, *, defocus_m, best_focus_m, convergence_angle_rad,
+               pixel_size_y_nm, pixel_size_x_nm, return_device=False):
+        from nion.usim_device import HAADFFocusModel
+        cp = self._cp
+        output = cp.zeros(self.shape, cp.float32)
+        combined = cp.zeros_like(output)
+        sigmas = numpy.asarray([HAADFFocusModel._probe_sigma(
+            (defocus_m-best_focus_m-self.depth(i)*1e-9)*1e9, convergence_angle_rad,
+            pixel_size_y_nm, pixel_size_x_nm, SimulationSettings.MINIMUM_SIGMA_PX) for i in range(len(self))])
+        large = numpy.max(sigmas, axis=1) >= SimulationSettings.FOURIER_BLUR_THRESHOLD_PX
+        for i in numpy.flatnonzero(~large):
+            output += self.blur(self.plane(int(i)), *sigmas[i])
+        # Batch slices and DCTs instead of ~64 independent transforms/launches.
+        # Bound temporary stacks to 128 MiB even for a 2048-square record.
+        batch_size = max(1, (128*1024*1024)//(self._lower.size*4))
+        selected = numpy.flatnonzero(large)
+        for start in range(0, len(selected), batch_size):
+            indexes = selected[start:start+batch_size]
+            key = tuple(indexes)
+            spectra = self._batch_spectra.get(key)
+            if spectra is None:
+                lows = self._origin+indexes*self._slice
+                steps = numpy.minimum(self._slice, self._end-lows)
+                stack = self._slice_kernel(self._lower[None], self._upper[None],
+                    cp.asarray(lows)[:, None, None], cp.asarray(steps)[:, None, None],
+                    self._reference, self._normalize, self._column_intensity)
+                spectra = self._fft.dctn(stack, axes=(-2, -1), norm='ortho')
+                if self._cached_bytes+spectra.nbytes <= SimulationSettings.GPU_DEPTH_SPECTRUM_CACHE_BYTES:
+                    self._batch_spectra[key] = spectra
+                    self._cached_bytes += spectra.nbytes
+            shapes = [HAADFFocusModel._spectral_shape(self.shape, *sigmas[i]) for i in indexes]
+            rows, columns = numpy.max(shapes, axis=0)
+            ys = cp.asarray(sigmas[indexes, 0])[:, None]
+            xs = cp.asarray(sigmas[indexes, 1])[:, None]
+            wy = cp.exp(-.5*self._frequency_y[None, :rows]*ys**2).astype(cp.float32)
+            wx = cp.exp(-.5*self._frequency_x[None, :columns]*xs**2).astype(cp.float32)
+            limits = cp.asarray(shapes)
+            wy *= cp.arange(rows)[None, :] < limits[:, 0, None]
+            wx *= cp.arange(columns)[None, :] < limits[:, 1, None]
+            combined[:rows, :columns] += cp.sum(spectra[:, :rows, :columns]*wy[:, :, None]*wx[:, None, :], axis=0)
+        if len(selected):
+            output += self._fft.idctn(combined, norm='ortho')
+        return output if return_device else cp.asnumpy(output)
+
+
+class GPUCompositeDepthPlanes(typing.Sequence):
+    """Render independent material intervals without filling vacuum between them."""
+    _on_gpu = True
+
+    def __init__(self, layers):
+        self.layers = tuple(layers)
+
+    def __len__(self):
+        return sum(len(layer) for layer in self.layers)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return tuple(self[i] for i in range(*index.indices(len(self))))
+        if index < 0:
+            index += len(self)
+        for layer in self.layers:
+            if 0 <= index < len(layer):
+                return layer[index]
+            index -= len(layer)
+        raise IndexError(index)
+
+    def render(self, *, return_device=False, **settings):
+        cp = self.layers[0]._cp
+        result = cp.zeros(self.layers[0].shape, dtype=cp.float32)
+        for layer in self.layers:
+            result += layer.render(return_device=True, **settings)
+        return result if return_device else cp.asnumpy(result)
