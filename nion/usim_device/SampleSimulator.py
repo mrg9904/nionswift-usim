@@ -1,5 +1,8 @@
 # standard libraries
 import abc
+import math
+
+from nion.usim_device import EELSModel
 import gettext
 import logging
 
@@ -103,6 +106,16 @@ class Feature:
         feature_rect_m = self.get_feature_rect_m()
         probe_position_m = Geometry.FloatPoint(y=probe_position.y * scan_rect_m.height + scan_rect_m.top, x=probe_position.x * scan_rect_m.width + scan_rect_m.left)
         return scan_rect_m.intersects_rect(feature_rect_m) and feature_rect_m.contains_point(probe_position_m)
+
+    def thickness_at(self, position_m: Geometry.FloatPoint) -> float:
+        """Local beam-path length; legacy flat features default to 30 nm."""
+        if not self.get_feature_rect_m().contains_point(position_m):
+            return 0.0
+        return float(getattr(self, "thickness_nm", 30.0))
+
+    @property
+    def eels_material(self) -> EELSModel.EELSMaterial:
+        return EELSModel.EELSMaterial(edges=tuple(self.edges), plasmon_eV=self.plasmon_eV)
 
     def plot(self, data: _NDArray, offset_m: Geometry.FloatPoint, fov_nm: Geometry.FloatSize, center_nm: Geometry.FloatPoint, shape: Geometry.IntSize) -> int:
         raise NotImplementedError()
@@ -232,6 +245,20 @@ class Sample(abc.ABC):
     @property
     @abc.abstractmethod
     def features(self) -> typing.List[Feature]: ...
+
+    @property
+    def initial_view(self) -> typing.Tuple[Geometry.FloatPoint, float]:
+        """Stage position (meters) and initial FoV (nm) for this specimen."""
+        return Geometry.FloatPoint(), 200.0
+
+    def eels_layers_at(self, position_m: Geometry.FloatPoint) -> typing.List[EELSModel.EELSLayer]:
+        """Query specimen geometry in absolute sample coordinates (meters)."""
+        layers = []
+        for feature in self.features:
+            thickness = feature.thickness_at(position_m)
+            if thickness > 0:
+                layers.append(EELSModel.EELSLayer(thickness, feature.eels_material))
+        return layers
 
     @abc.abstractmethod
     def plot_features(self, data: _NDArray, offset_m: Geometry.FloatPoint, fov_size_nm: Geometry.FloatSize, extra_nm: Geometry.FloatPoint, center_nm: Geometry.FloatPoint, used_size: Geometry.IntSize) -> None: ...
@@ -724,6 +751,10 @@ class SphericalParticleFeature(Feature):
 
         # A thickness of 20 nm corresponds to an HAADF intensity of 1.
         self.reference_thickness_nm = 20.0
+
+    def thickness_at(self, position_m: Geometry.FloatPoint) -> float:
+        radial_squared = ((position_m.x - self.position_m.x) * 1e9)**2 + ((position_m.y - self.position_m.y) * 1e9)**2
+        return 2 * math.sqrt(max(0.0, self.radius_nm**2 - radial_squared))
 
     def _radial_distance_squared_nm(
         self,

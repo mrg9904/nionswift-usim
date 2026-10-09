@@ -99,3 +99,9 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# Local EELS verification artifacts.
+tools/eels_thickness_results/
+
+# Temporary Nion acquisition test settings.
+test_data/

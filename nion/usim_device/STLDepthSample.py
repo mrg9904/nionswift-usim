@@ -9,6 +9,7 @@ import numpy
 import numpy.typing
 import trimesh
 
+from nion.usim_device import EELSModel
 from nion.usim_device import SampleSimulator
 from nion.usim_device import SimulationSettings
 from nion.usim_device import SurfaceRasterizer
@@ -81,8 +82,7 @@ class STLDepthSample(SampleSimulator.Sample):
             )
         )
 
-        # This initial implementation provides HAADF geometry only.
-        # No EELS features are assigned yet.
+        # STL has no feature objects; EELS queries the same mesh geometry directly.
         self.__features: typing.List[
             SampleSimulator.Feature
         ] = list()
@@ -112,11 +112,31 @@ class STLDepthSample(SampleSimulator.Sample):
     ) -> typing.List[SampleSimulator.Feature]:
         """Return EELS-compatible features.
 
-        The initial STL implementation only provides HAADF geometry, so this
-        list is empty.
+        STL geometry is queried through eels_layers_at rather than feature objects.
         """
 
         return self.__features
+
+    @property
+    def initial_view(self) -> typing.Tuple[Geometry.FloatPoint, float]:
+        return Geometry.FloatPoint(x=1222e-9, y=279e-9), 10000.0
+
+    def eels_layers_at(self, position_m: Geometry.FloatPoint) -> typing.List[EELSModel.EELSLayer]:
+        """Use the same vertical surface geometry as the HAADF projection.
+
+        The mesh remains column-solid along Z. STL has geometry but no chemical
+        identities, so a configurable uniform synthetic Ni-like material is used.
+        """
+        lower, upper = self.__rasterizer.surface_maps(
+            numpy.asarray([position_m.x * 1e9]), numpy.asarray([position_m.y * 1e9]))
+        thickness = float(upper[0, 0] - lower[0, 0])
+        if not numpy.isfinite(thickness) or thickness <= 0:
+            return []
+        material = EELSModel.EELSMaterial(
+            edges=tuple(SimulationSettings.STL_EELS_EDGES),
+            plasmon_eV=SimulationSettings.STL_EELS_PLASMON_EV,
+            mean_free_path_nm=SimulationSettings.STL_EELS_MEAN_FREE_PATH_NM)
+        return [EELSModel.EELSLayer(thickness, material)]
 
     @staticmethod
     def __geometry_key(

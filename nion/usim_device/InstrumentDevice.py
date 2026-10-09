@@ -417,7 +417,7 @@ class ValueManager(Observable.Observable, InstrumentDevice.ValueManagerLike):
     def __create_built_in_controls(self) -> typing.List[typing.Union[Variable, Control2D]]:
         zlp_tare_control = Control("ZLPtare")
         zlp_offset_control = Control("ZLPoffset", -20, [(zlp_tare_control, 1.0)])
-        stage_position_m = Control2D("stage_position_m", ("x", "y"), local_values=(1222e-9, 279e-9))
+        stage_position_m = Control2D("stage_position_m", ("x", "y"), local_values=(0.0, 0.0))
         beam_current = Control("BeamCurrent", 200e-12)
         # monochromator controls
         mc_exists = Control("S_MC_InsideColumn", local_value=8)  # Used by tuning to check if scope has a monochromator
@@ -849,7 +849,12 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
 
     @sample_index.setter
     def sample_index(self, value: int) -> None:
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < len(self.__samples):
+            raise ValueError("sample_index is out of range")
+        if value == self.__sample_index:
+            return
         self.__sample_index = value
+        self.notify_property_changed("sample_index")
 
     def generate_scan_data(self, instrument: InstrumentDevice.Instrument, scan_frame_parameters: ScanDevice.ScanFrameParameters) -> numpy.typing.NDArray[numpy.float32]:
         size = scan_frame_parameters.size

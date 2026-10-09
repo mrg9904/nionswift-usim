@@ -43,19 +43,32 @@ class TestCamera(CameraControl_test.TestCameraControlClass):
             self.assertEqual(len(document_model.data_items[0].xdata.data_shape), 1)
 
     def test_camera_eels_connects_to_probe_position(self) -> None:
-        # ensure that the probe position is connected to the EELS camera data
+        # Use explicit specimen geometry, independent of startup defaults.
         with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
+            instrument = test_context.instrument
+            instrument.stage_position_m = Geometry.FloatPoint()
+            instrument.scan_data_generator.sample_index = 5  # radius 50 nm sphere
             scan_hardware_source = test_context.scan_hardware_source
+            frame = scan_hardware_source.get_current_frame_parameters()
+            frame.fov_nm = 160
+            scan_hardware_source.set_current_frame_parameters(frame)
             self._acquire_one(document_controller, scan_hardware_source)
-            stem_controller = test_context.instrument
-            stem_controller.probe_position = Geometry.FloatPoint(x=0.5, y=0.5)
-            eels_camera_hardware_source = test_context.camera_hardware_source
-            self._acquire_one(document_controller, eels_camera_hardware_source)
-            self.assertLess(10e6, numpy.average(document_controller.document_model.data_items[-1].xdata.data[30:45]))
-            stem_controller.probe_position = Geometry.FloatPoint(x=0.25, y=0.25)
-            self._acquire_one(document_controller, eels_camera_hardware_source)
-            self.assertGreater(1e3, numpy.average(document_controller.document_model.data_items[-1].xdata.data[30:45]))
+            eels_camera = test_context.camera_hardware_source
+            for probe, expected_thickness in ((Geometry.FloatPoint(.5, .5), 100),
+                                                (Geometry.FloatPoint(.25, .25), 0)):
+                instrument.probe_position = probe
+                self._acquire_one(document_controller, eels_camera)
+                xdata = document_controller.document_model.data_items[-1].xdata
+                calibration = xdata.dimensional_calibrations[-1]
+                data = xdata.data
+                spectrum = data.sum(axis=0) if data.ndim == 2 else data
+                energies = calibration.offset + numpy.arange(len(spectrum))*calibration.scale
+                inelastic = spectrum[(energies > 10) & (energies < 100)].sum()
+                if expected_thickness:
+                    self.assertGreater(inelastic, 1e6)
+                else:
+                    self.assertLess(inelastic, 1e3)
 
     def test_camera_waits_for_external_trigger(self) -> None:
         for external_trigger in [False, True]:

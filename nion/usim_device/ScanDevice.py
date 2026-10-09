@@ -8,6 +8,7 @@ import typing
 
 # libraries
 from nion.utils import Geometry
+from nion.utils import ReferenceCounting
 
 # other plug-ins
 from nion.instrumentation import scan_base
@@ -136,9 +137,29 @@ class ScanModule(scan_base.ScanModule):
         self.stem_controller_id = instrument.instrument_id
         self.device = ScanDevice.Device("usim_scan_device", _("uSim Scan"), instrument, ScanBoxSimulator(instrument.scan_data_generator))
         setattr(self.device, "priority", 20)
+        self.__instrument = instrument
+        generator = typing.cast(InstrumentDevice_.ScanDataGenerator, instrument.scan_data_generator)
+        stage, initial_fov_nm = generator.sample.initial_view
+        instrument.stage_position_m = stage
         scan_modes = (
-            scan_base.ScanSettingsMode(_("Fast"), "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=10000.0)),
-            scan_base.ScanSettingsMode(_("Slow"), "slow", ScanDevice.ScanFrameParameters(pixel_size=(512, 512), pixel_time_us=1, fov_nm=10000.0)),
-            scan_base.ScanSettingsMode(_("Record"), "record", ScanDevice.ScanFrameParameters(pixel_size=(1024, 1024), pixel_time_us=1, fov_nm=10000.0))
+            scan_base.ScanSettingsMode(_("Fast"), "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=initial_fov_nm)),
+            scan_base.ScanSettingsMode(_("Slow"), "slow", ScanDevice.ScanFrameParameters(pixel_size=(512, 512), pixel_time_us=1, fov_nm=initial_fov_nm)),
+            scan_base.ScanSettingsMode(_("Record"), "record", ScanDevice.ScanFrameParameters(pixel_size=(1024, 1024), pixel_time_us=1, fov_nm=initial_fov_nm))
         )
         self.settings = scan_base.ScanSettings(self.device.scan_device_id, scan_modes, lambda d: ScanDevice.ScanFrameParameters(d), 0, 2)
+        self.__sample_changed_listener = generator.property_changed_event.listen(
+            ReferenceCounting.weak_partial(ScanModule.__sample_changed, self))
+
+    def __sample_changed(self, name: str) -> None:
+        if name != "sample_index":
+            return
+        generator = typing.cast(InstrumentDevice_.ScanDataGenerator, self.__instrument.scan_data_generator)
+        stage, fov_nm = generator.sample.initial_view
+        self.__instrument.stage_position_m = stage
+        for index in range(3):
+            parameters = self.settings.get_frame_parameters(index)
+            parameters.fov_nm = fov_nm
+            parameters.center_nm = Geometry.FloatPoint()
+            self.settings.set_frame_parameters(index, parameters)
+        # Invalidate dependent camera data even when the restored stage is unchanged.
+        self.__instrument.value_manager.property_changed_event.fire("features")

@@ -77,3 +77,26 @@ class PoissonNoise:
             return input + (poisson_data - self.poisson_level)
         return input
 
+
+
+class EELSShotNoise:
+    """Sample actual electrons per channel; preserve calibrations and metadata."""
+
+    def __init__(self, counts_per_electron: float, seed: typing.Optional[int] = None) -> None:
+        if not math.isfinite(counts_per_electron) or counts_per_electron <= 0:
+            raise ValueError("counts_per_electron must be finite and positive")
+        self.enabled = True
+        self._gain = counts_per_electron
+        self._rng = numpy.random.default_rng(seed)
+
+    def apply(self, source: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
+        if not self.enabled:
+            return source
+        data = source._data_ex
+        sampled = (self._rng.poisson(numpy.maximum(data, 0)/self._gain)*self._gain).astype(data.dtype)
+        return DataAndMetadata.new_data_and_metadata(sampled,
+            intensity_calibration=source.intensity_calibration,
+            dimensional_calibrations=source.dimensional_calibrations,
+            metadata=source.metadata, timestamp=source.timestamp,
+            data_descriptor=source.data_descriptor,
+            timezone=source.timezone, timezone_offset=source.timezone_offset)

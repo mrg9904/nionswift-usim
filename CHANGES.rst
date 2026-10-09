@@ -1,6 +1,15 @@
 Changelog (nionswift-usim)
 ==========================
 
+Unreleased
+----------
+- Use local STL/spherical/block specimen thickness for EELS instead of fixed feature counts.
+- Add thickness-dependent compound-Poisson plural loss, window-conserving channel integration,
+  independent energy binning, electron-counting noise and geometry metadata.
+- Add physical, camera and probe-position regressions plus a deterministic sphere review tool.
+- Restore origin/200 nm views on non-STL selection; retain the ten-particle STL overview
+  and update all scan profiles on specimen changes.
+
 5.4.2 (2025-08-11)
 ------------------
 - Fix issue when running as offline installer plug-in.

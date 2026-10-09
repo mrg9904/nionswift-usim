@@ -158,3 +158,10 @@ HAADF_DETECTION_EFFICIENCY = 0.3
 
 # Optional additive detector read noise, in detected electrons per pixel.
 HAADF_READ_NOISE_ELECTRONS = 0.5
+
+# STL has geometry only; these define one uniform synthetic EELS material.
+# The default uses the existing Ni-like edge/plasmon values, not a chemical
+# identity inferred from the STL. Restart uSim after changing these values.
+STL_EELS_EDGES = ((68, 30), (855, 50), (872, 50))
+STL_EELS_PLASMON_EV = 20.0
+STL_EELS_MEAN_FREE_PATH_NM = 100.0

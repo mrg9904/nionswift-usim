@@ -174,3 +174,76 @@ deterministic images.
 Run the numerical regression checks in the Nion Swift environment::
 
     python -m unittest nionswift_plugin.usim.test.HAADFPerformance_test -v
+
+
+Geometry-driven EELS
+--------------------
+
+EELS now queries the local specimen beam-path length, rather than counting
+features as fixed 30 nm layers. ``Sample.eels_layers_at`` returns thicknesses
+and synthetic material parameters in absolute sample coordinates. Thickness
+blocks use 20/50/100 nm; the radius 50 nm spherical sample uses the chord
+``t(r) = 2 sqrt(R^2-r^2)`` and returns vacuum outside its circular projection.
+STL uses the same vertical surface rasterizer as HAADF. The column-solid STL
+constraint still applies. Legacy flat features without thickness retain their
+30 nm default. Stage/beam offsets, scan center and scan rotation affect the
+probe geometry.
+
+The inelastic optical depth is ``tau = sum(t_i/lambda_i)``. Independent events
+follow ``P(n) = exp(-tau) tau^n/n!``; each order convolves the single-event
+loss kernel. Mixed layers contribute in proportion to their optical depth.
+Scattering orders extend until the omitted Poisson probability is below
+1e-10; the old fixed ``feature.plurality`` no longer limits camera spectra.
+Zero-loss fraction is ``exp(-tau)``. Detector channels integrate probabilities,
+so coarse dispersion does not lose the ZLP. Exposure/current scale counts;
+energy binning sums them. Moving the energy window does not renormalize its
+signal. Counts beyond the captured energy range are genuinely absent.
+
+This remains a phenomenological model: Gaussian plasmons and smooth synthetic
+core edges, default lambda 100 nm and core-event fraction 0.03. It does not
+calculate material cross sections, ELNES, elastic/aperture losses, energy- or
+voltage-dependent mean free paths, channeling or a finite convergent probe.
+A mesh carries no chemistry. ``STL_EELS_EDGES``, ``STL_EELS_PLASMON_EV`` and
+``STL_EELS_MEAN_FREE_PATH_NM`` explicitly assign one uniform synthetic Ni-like
+material; change them in ``SimulationSettings.py`` and restart uSim. The
+sphere uses the same default Ni-like parameters. These defaults are suitable
+for testing geometric thickness trends, not quantitative material analysis.
+
+EELS shot noise samples actual electrons per channel using camera gain. The
+simulator frame includes ``eels_simulation`` metadata with local thickness,
+optical depth, ideal zero-loss fraction and detector-window fraction. Device
+record/sequence properties retain this snapshot; the installed Nion live
+bridge may discard custom frame metadata. Spectrum images must not interpret
+a single final-frame snapshot as a spatial thickness map.
+
+Select **Spherical Particle**, center the stage at zero, set scan center zero
+and FoV about 160 nm, then move the probe from the particle center to its rim.
+For radius 50 nm and lambda 100 nm, center thickness is 100 nm with zero-loss
+fraction 0.3679; at radius 40 nm these become 60 nm and 0.5488. Outside radius
+50 nm the spectrum is vacuum ZLP. Restart Nion Swift to reload this code.
+
+Run the physical model checks in nionswift-dev::
+
+    python -m unittest nionswift_plugin.usim.test.EELSModel_test -v
+
+Generate deterministic spectra and geometry CSV/NPZ for inspection::
+
+    python tools/preview_eels_thickness.py --data-only
+
+With Matplotlib installed, render the same data (this step can use a separate
+plotting environment without Nion; activate that environment first so its
+native DLL search paths are available)::
+
+    python tools/preview_eels_thickness.py --render-only
+
+Outputs are local and ignored under ``tools/eels_thickness_results/``.
+
+
+Sample-specific initial views
+-----------------------------
+
+On startup and each specimen change, the ten-particle **STL Depth Sample** uses
+stage x=1222 nm, y=279 nm and FoV 10000 nm. Every other sample starts at stage
+(0, 0) with FoV 200 nm. Fast/Slow/Record profiles and scan center are updated
+on selection, while pixel sizes and dwell times remain as configured.
+Re-selecting the already active sample does not reset a manually adjusted view.
