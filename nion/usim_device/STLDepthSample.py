@@ -28,14 +28,15 @@ class STLDepthSample(SampleSimulator.Sample):
     side-sphere model satisfies this requirement.
     """
 
-    def __init__(self, stage_size_nm: float) -> None:
+    def __init__(self, stage_size_nm: float, *, file_name: typing.Optional[str] = None,
+                 shift_nm: typing.Optional[typing.Tuple[float, float]] = None) -> None:
         # Keep the standard uSim sample constructor interface.
         _ = stage_size_nm
 
         stl_path = (
             pathlib.Path(__file__).resolve().parent
             / "samples"
-            / SimulationSettings.STL_SAMPLE_FILE_NAME
+            / (file_name or SimulationSettings.STL_SAMPLE_FILE_NAME)
         )
 
         if not stl_path.is_file():
@@ -63,10 +64,12 @@ class STLDepthSample(SampleSimulator.Sample):
             )
 
         # Move the selected cuboid to the default uSim scan center.
+        shift = shift_nm if shift_nm is not None else (
+            SimulationSettings.STL_SAMPLE_SHIFT_X_NM, SimulationSettings.STL_SAMPLE_SHIFT_Y_NM)
         mesh.apply_translation(
             (
-                SimulationSettings.STL_SAMPLE_SHIFT_X_NM,
-                SimulationSettings.STL_SAMPLE_SHIFT_Y_NM,
+                shift[0],
+                shift[1],
                 0.0,
             )
         )

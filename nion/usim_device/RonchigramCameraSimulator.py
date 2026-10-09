@@ -19,6 +19,7 @@ from nion.usim_device import EELSModel
 from nion.usim_device import KikuchiModel
 from nion.usim_device import RonchigramContrast
 from nion.usim_device import SampleSimulator
+from nion.usim_device import LaceyCarbonSample
 from nion.usim_device import SimulationSettings
 from nion.usim_device import InstrumentDevice as InstrumentDevice_
 from nion.utils import Geometry
@@ -57,6 +58,10 @@ class AberrationsController:
         height = int(aberrations["height"])
         width = int(aberrations["width"])
         theta = aberrations["theta"]
+        max_defocus = self.__max_defocus * float(aberrations.get("source_scale", 1.0))
+        if getattr(self, "_source_scale", None) != max_defocus:
+            self._source_scale = max_defocus
+            self.__c = None
 
         if theta != self.__theta or width != self.__width or height != self.__height:
             self.__width = width
@@ -221,8 +226,8 @@ class AberrationsController:
         if self.__c is None and self.__chi is not None:
             # print("recalculating grad chi")
             grad_chi = numpy.gradient(self.__chi)
-            max_chi0 = self.__max_defocus * theta * theta
-            max_chi1 = self.__max_defocus * theta * theta * ((1 - 1 / width) * (1 - 1 / width) + (1 - 1 / height) * (1 - 1 / height)) / 2
+            max_chi0 = max_defocus * theta * theta
+            max_chi1 = max_defocus * theta * theta * ((1 - 1 / width) * (1 - 1 / width) + (1 - 1 / height) * (1 - 1 / height)) / 2
             max_chi = max_chi0 - max_chi1
             scale_y = height / 2 / max_chi
             scale_x = width / 2 / max_chi
@@ -232,7 +237,7 @@ class AberrationsController:
 
         if self.__c is not None:
             # scale the offsets so that at max defocus, the coordinates cover the entire area of data.
-            max_chi = self.__max_defocus * theta * theta * (1 - ((1 - 1 / width)**2 + (1 - 1 / height)**2)/2)
+            max_chi = max_defocus * theta * theta * (1 - ((1 - 1 / width)**2 + (1 - 1 / height)**2)/2)
             dy = height/2/max_chi * (2*theta/(height-1)) * self.__coefficients.get("c0b", 0.)
             dx = width/2/max_chi * (2*theta/(width-1)) * self.__coefficients.get("c0a", 0.)
             backend = SimulationSettings.RONCHIGRAM_BACKEND
@@ -342,6 +347,7 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         self.__cached_frame: typing.Optional[DataAndMetadata.DataAndMetadata] = None
         max_defocus = instrument.max_defocus
         self.__stage_size_nm = stage_size_nm
+        self.__source_fov_nm = stage_size_nm
         self.__data_scale = 1.0
         self.__aperture_ellipse: typing.Optional[typing.Tuple[float, float, float, float, float]] = None
         self.__aperture_mask = None
@@ -370,6 +376,7 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         sample = self.instrument.scan_data_generator.sample
         offset_m = self.instrument.stage_position_m
         sphere = isinstance(sample, SampleSimulator.SphericalParticleSample)
+        lacey = isinstance(sample, LaceyCarbonSample.LaceyCarbonSample)
         key = None
         if sphere:
             key = (id(sample), offset_m.y, offset_m.x,
@@ -380,8 +387,13 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                          for f in sample.features))
             if key == self.__source_key and self.__source_data is not None:
                 return self.__source_data
+        elif lacey:
+            key = (id(sample), offset_m.y, offset_m.x, self.__source_fov_nm, readout_area.as_tuple(),
+                   binning_shape.as_tuple(), SimulationSettings.RONCHIGRAM_TRANSMISSION_LENGTH_NM)
+            if key == self.__source_key and self.__source_data is not None:
+                return self.__source_data
         height, width = readout_area.height, readout_area.width
-        full_fov_nm = self.__stage_size_nm
+        full_fov_nm = self.__source_fov_nm
         fov_size_nm = Geometry.FloatSize(full_fov_nm*height/self._sensor_dimensions.height,
                                         full_fov_nm*width/self._sensor_dimensions.width)
         center_nm = Geometry.FloatPoint(full_fov_nm*(readout_area.center.y/self._sensor_dimensions.height-.5),
@@ -394,7 +406,7 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             data = 100-data
         data = self._get_binned_data(data, binning_shape)
         self.__source_key = key
-        self.__source_data = data if sphere else None
+        self.__source_data = data if sphere or lacey else None
         return data
 
     def stage_displacement_for_pixel(self, position, image_shape):
@@ -409,8 +421,8 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             return None
         area = settings.readout_area
         return Geometry.FloatPoint(
-            y=displacement.y*self.__stage_size_nm*area.height/self._sensor_dimensions.height*1e-9,
-            x=displacement.x*self.__stage_size_nm*area.width/self._sensor_dimensions.width*1e-9)
+            y=displacement.y*self.__source_fov_nm*area.height/self._sensor_dimensions.height*1e-9,
+            x=displacement.x*self.__source_fov_nm*area.width/self._sensor_dimensions.width*1e-9)
 
     def _apply_kikuchi(self, data, readout_area, binning_shape, frame_settings, scan_context):
         sample = self.instrument.scan_data_generator.sample
@@ -519,6 +531,17 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             thickness_param = 100
             value_manager = typing.cast(InstrumentDevice_.ValueManager, self.instrument.value_manager)
             metadata = {}
+            # Large support films must not be clipped to the historical 1 um
+            # source. Enclose ray displacements, with headroom for aberrations;
+            # powers of two retain the projection cache across small focus steps.
+            self.__source_fov_nm = self.__stage_size_nm
+            if isinstance(sample, LaceyCarbonSample.LaceyCarbonSample):
+                half_angle = self._tv_pixel_angle * self._sensor_dimensions.height / 2
+                beam = self.instrument.GetVal2D("beam_shift_m")
+                probe_extent = max(tuple(scan_context.fov_size_nm or Geometry.FloatSize()))
+                required = (4 * abs(self.instrument.GetVal("C10Control")) * half_angle * 1e9
+                            + 2 * max(abs(beam.x), abs(beam.y)) * 1e9 + probe_extent)
+                self.__source_fov_nm *= 2 ** max(0, math.ceil(math.log2(max(required / self.__stage_size_nm, 1))))
             if not value_manager.is_blanked:
                 data = self._source_image(readout_area, binning_shape)
             else:
@@ -539,6 +562,7 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                 aberrations["height"] = data.shape[0]
                 aberrations["width"] = data.shape[1]
                 aberrations["theta"] = theta
+                aberrations["source_scale"] = self.__source_fov_nm / self.__stage_size_nm
                 aberrations["c0a"] = self.instrument.GetVal2D("beam_shift_m").x + scan_offset[1]
                 aberrations["c0b"] = self.instrument.GetVal2D("beam_shift_m").y + scan_offset[0]
                 aberrations["c10"] = self.instrument.GetVal("C10Control")

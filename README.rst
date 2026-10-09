@@ -389,3 +389,29 @@ stage x=1222 nm, y=279 nm and FoV 10000 nm. Every other sample starts at stage
 (0, 0) with FoV 200 nm. Fast/Slow/Record profiles and scan center are updated
 on selection, while pixel sizes and dwell times remain as configured.
 Re-selecting the already active sample does not reset a manually adjusted view.
+
+LaceyCarbon support film
+------------------------
+
+Select **LaceyCarbon** in the instrument sample menu after restarting uSim.
+The packaged smooth combined STL contains a 54 x 54 um perforated amorphous
+carbon film (5 nm thick) inside a 100 x 100 um copper frame (10 um thick,
+54 um opening). Coordinates are in nm and the model is centered at the origin.
+Its initial view follows the other non-particle samples: 200 nm at (0, 0).
+Use FoV 54000 nm to see the film or 100000 nm to see the complete grid.
+
+HAADF uses thin-film thickness contrast and a saturated entrance-surface
+approximation for the opaque copper frame. EELS samples the actual combined
+mesh thickness with separate synthetic carbon and copper material parameters
+(carbon K onset 284 eV; copper M/L onsets 75/932/952 eV). This remains a
+phenomenological spectrum model; 10 um copper is outside thin-specimen EELS.
+Ronchigram uses nonnegative thickness-dependent transmission, holes as vacuum,
+fresh detector noise, and the existing aberration/probe mapping. The amorphous
+support has no assigned crystal orientation or Kikuchi lines.
+The Ronchigram source projection expands with defocus and probe displacement;
+it is not restricted to the legacy 1 um field. Source scaling also updates the
+aberration mapping and double-click stage displacement. Near zero defocus a
+uniform carbon patch can give an almost uniform Ronchigram: the 5 nm film has
+about 3.3 percent transmission contrast under the default 150 nm attenuation
+length. Defocus of 10000--50000 nm reveals progressively wider areas of the
+film; these values represent 10--50 um, not 10--50 nm.

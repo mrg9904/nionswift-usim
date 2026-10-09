@@ -29,6 +29,7 @@ from nion.usim_device import SampleSimulator
 from nion.usim_device import HAADFFocusModel
 from nion.usim_device import SimulationSettings
 from nion.usim_device import STLDepthSample
+from nion.usim_device import LaceyCarbonSample
 from nion.usim_device import Noise
 
 _NDArray = numpy.typing.NDArray[typing.Any]
@@ -833,6 +834,7 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
             STLDepthSample.STLDepthSample(
                 self.stage_size_nm
             ),
+            LaceyCarbonSample.LaceyCarbonSample(self.stage_size_nm),
         ]
         self.__sample_index = sample_index
 

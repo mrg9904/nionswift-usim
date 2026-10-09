@@ -1,0 +1,82 @@
+{
+  "coordinate_unit": "nm",
+  "origin": "XY centre; both solids start at z=0",
+  "template": "Carbon_film_mask.jpg",
+  "template_sha256": "fa9c33b4a5e02388c122845464ba4b0f2b70aee68f3e2ffe0b9469d1db084bf7",
+  "template_shape_px": [
+    492,
+    492
+  ],
+  "dark_threshold_inclusive": 169,
+  "diagonal_contact_pixels_filled": 33,
+  "carbon_area_fraction": 0.23007551721858682,
+  "carbon_components": 7,
+  "carbon_size_nm": [
+    54000,
+    54000,
+    5
+  ],
+  "copper_outer_size_nm": [
+    100000,
+    100000,
+    10000
+  ],
+  "copper_opening_size_nm": [
+    54000,
+    54000
+  ],
+  "copper_frame_width_nm": 23000,
+  "parts": {
+    "lacey_carbon_54um_5nm.stl": {
+      "faces": 267644,
+      "bounds_nm": [
+        [
+          -27000.0,
+          -27000.0,
+          0.0
+        ],
+        [
+          27000.0,
+          27000.0,
+          5.0
+        ]
+      ],
+      "volume_nm3": 3354501025.0507565,
+      "watertight": true
+    },
+    "copper_grid_100um_10um.stl": {
+      "faces": 32,
+      "bounds_nm": [
+        [
+          -50000.0,
+          -50000.0,
+          0.0
+        ],
+        [
+          50000.0,
+          50000.0,
+          10000.0
+        ]
+      ],
+      "volume_nm3": 70840000000000.0,
+      "watertight": true
+    },
+    "lacey_carbon_with_copper_grid.stl": {
+      "faces": 267676,
+      "bounds_nm": [
+        [
+          -50000.0,
+          -50000.0,
+          0.0
+        ],
+        [
+          50000.0,
+          50000.0,
+          10000.0
+        ]
+      ],
+      "volume_nm3": 70843354501025.05,
+      "watertight": true
+    }
+  }
+}
