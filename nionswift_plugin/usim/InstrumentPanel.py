@@ -155,7 +155,7 @@ class InstrumentWidget(Widgets.CompositeWidgetBase):
         stage_position_widget = PositionWidget(ui, _("Stage"), value_manager, "stage_position_m")
         stage_z_field = ui.create_line_edit_widget()
         stage_z_field.bind_text(ControlBinding(value_manager, "stage_z_m",
-            converter=Converter.PhysicalValueToStringConverter(units="nm", multiplier=1E9)))
+            converter=Converter.PhysicalValueToStringConverter(units="µm", multiplier=1E6)))
         stage_z_row = ui.create_row_widget()
         stage_z_row.add_spacing(8)
         stage_z_row.add(ui.create_label_widget("Stage Z"))

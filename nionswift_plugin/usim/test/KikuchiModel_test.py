@@ -116,10 +116,10 @@ class TestKikuchiModel(unittest.TestCase):
             cropped = Geometry.IntRect(origin=Geometry.IntPoint(16, 32), size=Geometry.IntSize(64, 64))
             cal = camera.get_dimensional_calibrations(cropped, Geometry.IntSize(2, 4))
             angle = camera._tv_pixel_angle
-            self.assertAlmostEqual(cal[0].offset, (16+.5-64)*angle)
-            self.assertAlmostEqual(cal[1].offset, (32+1.5-64)*angle)
-            self.assertAlmostEqual(cal[0].scale, 2*angle)
-            self.assertAlmostEqual(cal[1].scale, 4*angle)
+            self.assertAlmostEqual(cal[0].offset, (16+.5-64+31*2)*angle)
+            self.assertAlmostEqual(cal[1].offset, (32+1.5-64+15*4)*angle)
+            self.assertAlmostEqual(cal[0].scale, -2*angle)
+            self.assertAlmostEqual(cal[1].scale, -4*angle)
         finally:
             camera.close()
 

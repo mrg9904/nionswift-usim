@@ -398,10 +398,13 @@ Nion Swift's existing shortcuts; ordinary D/F retain their 10 nm focus step.
 FoV uses the normal zoom factor raised to the step multiplier, preserving
 reciprocal zoom directions. Ctrl+brightness/contrast shortcuts are unchanged.
 
-Stage Z is editable in nm below Stage X/Y. Positive Z increases specimen height;
+Stage Z is editable in micrometres (µm) below Stage X/Y. Positive Z increases specimen height;
 the effective defocus in both HAADF and Ronchigram is C10Control minus Stage Z,
 without changing the lens defocus setting. Ronchigram angular calibration and
 source sampling are independent of the scan FoV at a fixed physical probe position.
+The Ronchigram output uses a 180-degree display rotation to align the viewing
+orientation with HAADF. Angular calibrations and double-click positioning
+follow the rotated display; the internal ray geometry remains unchanged.
 An off-center normalized probe can move physically when the scan FoV changes;
 that physical motion still updates all detectors. The uSim Scan Control panel
 suppresses the upstream simulator's 1600 nm maximum-FoV color warning, because
@@ -495,8 +498,70 @@ HAADF and EELS sum the carbon and prism material thickness separately and
 exclude the vacuum gap under the tilted base. EELS continues to use synthetic
 material spectra rather than CIF-based scattering cross sections.
 
-The three STL variants and packaged orientation record ``single_cathode.json``
+The complete STL and packaged orientation record ``single_cathode.json``
 are in ``nion/usim_device/samples/``. ``tools/create_hexagonal_prism.py``
 generates new randomized geometry and matching metadata; ``--seed`` reproduces
 a realization. Image previews and a readable geometry record are saved in
 ``tools/samples/hexagonal_prism/``. Restart uSim after regenerating a model.
+
+Thousand-prism assembly
+-----------------------
+
+``tools/create_thousand_cathodes.py`` builds a separate assembly of exactly
+1000 prisms on the current unmodified 54 um carbon and 85 um copper frame.
+The original single prism is removed from the copied support. Three independent
+edge lengths and the prism height follow a truncated Lorentzian in 50..1000 nm,
+with peak 300 nm and half-width at half-maximum 100 nm; each edge has an
+equal, parallel opposite edge. The base is a random convex hexagon, generally
+not regular. Cartesian normal components [abc] are integers in 0..100,
+excluding zero normals and alignment with Z; horizontal normals are allowed.
+
+The default seed is 20261010. A 25% intentional-cluster probability biases some
+XY positions towards existing particles. All projection overlaps are resolved
+by raising the later convex solid to its first vertical contact with earlier
+solids. This prevents interpenetration but does not solve mechanical stability.
+Placement retries any location whose highest particle vertex would exceed
+5 um above the carbon top; particle dimensions are not compressed or clipped.
+The saved model has 236 stacked particles and particle height about 2.50 um
+above the film. The copper frame remains 10 um thick; its height is separate
+from the particle stack limit. ``--size-peak-nm``, ``--size-hwhm-nm`` and
+``--max-stack-height-nm`` configure these parameters.
+
+Select **1000CathodeParticleOnCarbon** to view this assembly in HAADF, EELS,
+and Ronchigram. Its initial view centers particle #1 with a 2000 nm scan FoV.
+Each crystal uses the existing NNMTO CIF with its own saved rotation; local
+[001] follows its prism base normal. Stage tilt rotates both geometry and
+crystal orientation. The SingleCathodeOnCarbon sample remains available.
+
+Projection first checks particle bounds against the current physical view,
+then rasterizes only intersecting particles, within their pixel rectangles.
+EELS queries only particles under the probe. Ronchigram uses its illuminated
+source extent rather than scan FoV and combines independent crystal patterns.
+Particle geometry and diffraction caches are bounded. HAADF sums separate
+material intervals into at most 64 depth slices, excluding interparticle air
+gaps; very deep views therefore use a coarser depth approximation.
+
+Large views batch the independent prism projections on CUDA. HAADF generates
+depth planes on the GPU from sparse material intervals and retains focus
+spectra there. The CPU fallback visits only slices intersecting each interval.
+Ronchigram interpolates all crystal channels with one shared ray map, skips
+particles that contribute no sampled rays, and composes only local regions
+with Gaussian padding. Overlapping particles retain independent channels.
+Reflection lists are reused while focusing; diffraction image caches share
+the 256 MiB budget instead of evicting all but four particles. Automatic mode
+uses CUDA for the large shared operations, batches diffusion halos by shape,
+and uses CPU for small local pattern operations. Local images expand to stable
+pixel tiles so small focus changes reuse their pattern and blur caches.
+New view extents and tilts still require fresh geometry projections.
+
+The complete STL, ``1000_cathodes.json`` and ``1000_cathodes.npz`` are in
+``nion/usim_device/samples/``. Records contain IDs, centers, bottom-face centers,
+six edge lengths, height, Cartesian normal, spin, Euler angles, rotation matrix,
+all twelve world vertices, contact point, supporting-particle ID (0 for carbon)
+and stack level. ``transform_base_local_to_lab`` maps a local base whose centroid
+is the origin and whose normal is +Z into the specimen frame. Positions are nm;
+Euler angles use active extrinsic xyz in degrees. Use the matrix for an
+unambiguous orientation. ``tools/validate_thousand_cathodes.py`` independently
+checks the saved STL, array correspondence and solid separation using the
+separating-axis theorem, with 0.05 nm tolerance for float32 STL rounding.
+Top/side previews are in ``tools/samples/thousand_cathodes/``.

@@ -237,6 +237,51 @@ class GPUPreparedLayerPlanes(GPUPreparedDepthPlanes):
         return output if return_device else cp.asnumpy(output)
 
 
+class GPUSparseDepthPlanes(GPUPreparedDepthPlanes):
+    """Accumulate sparse independent intervals on GPU, preserving air gaps."""
+    def __init__(self, shape, intervals, depth_limits, copper):
+        empty = numpy.full(shape, numpy.nan, numpy.float32)
+        super().__init__(empty, empty, 1.)
+        self._depth_limits = depth_limits
+        self._copper_depth, copper_image = copper
+        self._copper = self._cp.asarray(copper_image)
+        self._count = 1+len(depth_limits)
+        pixels, lows, highs = [], [], []
+        for ys, xs, lower, upper in intervals:
+            valid = numpy.isfinite(lower) & numpy.isfinite(upper) & (upper > lower)
+            y, x = numpy.nonzero(valid)
+            pixels.append((y+(ys.start or 0))*shape[1]+x+(xs.start or 0))
+            lows.append(lower[valid])
+            highs.append(upper[valid])
+        self._pixels = self._cp.asarray(numpy.concatenate(pixels) if pixels else [], dtype=self._cp.int32)
+        self._lows = self._cp.asarray(numpy.concatenate(lows) if lows else [], dtype=self._cp.float32)
+        self._highs = self._cp.asarray(numpy.concatenate(highs) if highs else [], dtype=self._cp.float32)
+        self._accumulate = self._cp.RawKernel(r'''
+            extern "C" __global__ void intervals(const int* pixels,
+                const float* lo, const float* hi, int count, double bottom,
+                double top, float* plane) {
+                int i=blockIdx.x*blockDim.x+threadIdx.x;
+                if (i>=count) return;
+                float overlap=(float)fmax(0., fmin((double)hi[i],top)-fmax((double)lo[i],bottom));
+                if (overlap>0) atomicAdd(plane+pixels[i], overlap/20.f);
+            }
+        ''', 'intervals')
+
+    def depth(self, index):
+        return self._copper_depth if index == 0 else sum(self._depth_limits[index-1])*.5
+
+    def plane(self, index):
+        if index == 0:
+            return self._copper
+        result = self._cp.zeros(self.shape, self._cp.float32)
+        if self._pixels.size:
+            bottom, top = self._depth_limits[index-1]
+            self._accumulate(((self._pixels.size+255)//256,), (256,),
+                (self._pixels, self._lows, self._highs, numpy.int32(self._pixels.size),
+                 numpy.float64(bottom), numpy.float64(top), result))
+        return result
+
+
 class GPUCompositeDepthPlanes(typing.Sequence):
     """Render independent material intervals without filling vacuum between them."""
     _on_gpu = True

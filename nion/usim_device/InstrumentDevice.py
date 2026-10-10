@@ -31,6 +31,7 @@ from nion.usim_device import SimulationSettings
 from nion.usim_device import STLDepthSample
 from nion.usim_device import LaceyCarbonSample
 from nion.usim_device import SingleCathodeSample
+from nion.usim_device import ThousandCathodeSample
 from nion.usim_device import SampleGeometry
 from nion.usim_device import Noise
 
@@ -839,6 +840,7 @@ class ScanDataGenerator(Observable.Observable, ScanDevice.ScanDataGeneratorLike)
             ),
             LaceyCarbonSample.LaceyCarbonSample(self.stage_size_nm),
             SingleCathodeSample.SingleCathodeSample(self.stage_size_nm),
+            ThousandCathodeSample.ThousandCathodeSample(self.stage_size_nm),
         ]
         self.__sample_index = sample_index
 

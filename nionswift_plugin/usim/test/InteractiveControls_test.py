@@ -171,7 +171,7 @@ class TestInteractiveControls(unittest.TestCase):
             self.assertTrue(self.controls.handle_double_click(canvas, 96, 64, CanvasItem.KeyboardModifiers()))
             np.testing.assert_allclose(tuple(self.manager.get_value_2d('stage_position_m')), tuple(-delta), atol=1e-15)
             deltas.append(delta.x)
-        self.assertGreater(deltas[0], 0)
+        self.assertLess(deltas[0], 0)
         self.assertAlmostEqual(deltas[0], -deltas[1])
         self.manager.set_value('C10Control', 1000e-9)
         self.manager.set_value_2d('C12Control', Geometry.FloatPoint(x=500e-9, y=0))
@@ -211,7 +211,7 @@ class TestInteractiveControls(unittest.TestCase):
             canvas = SimpleNamespace(delegate=self.panel(device.camera_id), mouse_mapping=SimpleNamespace(
                 map_point_widget_to_image=lambda _: Geometry.FloatPoint(63.5, 95.5)))
             self.assertTrue(self.controls.handle_double_click(canvas, 96, 64, CanvasItem.KeyboardModifiers()))
-            self.assertLess(self.manager.get_value_2d('stage_position_m').x, 0)
+            self.assertGreater(self.manager.get_value_2d('stage_position_m').x, 0)
             # A camera without compatible simulation geometry must fall through.
             self.manager.ronchigram_camera = SimpleNamespace(camera_id=device.camera_id)
             self.assertFalse(self.controls.handle_double_click(canvas, 96, 64, CanvasItem.KeyboardModifiers()))

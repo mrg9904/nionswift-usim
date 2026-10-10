@@ -88,6 +88,32 @@ class GPULineRenderer:
         return cp.asnumpy(result)
 
 
+def batched_halos(images, pixel_angles, vacuum_level):
+    """Filter independent local images together, with bounded CUDA batches."""
+    if not images:
+        return []
+    try:
+        import cupy as cp
+        from cupyx.scipy.ndimage import gaussian_filter as gpu_filter
+        groups = {}
+        for index, image in enumerate(images):
+            groups.setdefault(image.shape, []).append(index)
+        result = [None]*len(images)
+        sigma = (0., *(SimulationSettings.RONCHIGRAM_DIFFUSE_SIGMA_RAD/np.abs(pixel_angles)))
+        for shape, indexes in groups.items():
+            batch_size = max(1, (64*1024*1024)//(np.prod(shape)*4))
+            for start in range(0, len(indexes), batch_size):
+                selected = indexes[start:start+batch_size]
+                stack = cp.asarray(np.stack([images[i] for i in selected]))
+                halos = cp.asnumpy(gpu_filter(cp.clip(stack, 0, vacuum_level), sigma, mode='nearest'))
+                for i, halo in zip(selected, halos):
+                    result[i] = halo
+        return result
+    except Exception as error:
+        logging.getLogger(__name__).warning('Batched diffusion CUDA unavailable; using CPU: %s', error)
+        return [None]*len(images)
+
+
 class ContrastComposer:
     """Own one pattern's blur bank; moving the probe does not rebuild it.
 
@@ -144,18 +170,19 @@ class ContrastComposer:
             images.append(self.filter(pattern, sigma, mode="nearest"))
         self.bank = xp.stack(images)
 
-    def compose(self, real_image, vacuum_level):
+    def compose(self, real_image, vacuum_level, *, halo=None):
         if vacuum_level <= 0:
             raise ValueError("Positive vacuum intensity required")
+        options = {} if halo is None else {'halo': halo}
         try:
-            return self._compose(real_image, vacuum_level)
+            return self._compose(real_image, vacuum_level, **options)
         except Exception as error:
             if self.backend != "gpu":
                 raise
             self._fallback(error)
-            return self._compose(real_image, vacuum_level)
+            return self._compose(real_image, vacuum_level, **options)
 
-    def _compose(self, real_image, vacuum_level):
+    def _compose(self, real_image, vacuum_level, *, halo=None):
         xp = self.xp
         if xp is np and not isinstance(real_image, np.ndarray):
             real_image = real_image.get()
@@ -165,7 +192,8 @@ class ContrastComposer:
         maximum = float(thickness.max())
         self._prepare(maximum)
         diffuse = -xp.expm1(-thickness/SimulationSettings.RONCHIGRAM_DIFFUSE_LENGTH_NM)
-        halo = self.filter(real, SimulationSettings.RONCHIGRAM_DIFFUSE_SIGMA_RAD/self.pixel_angles, mode="nearest")
+        halo = (self.filter(real, SimulationSettings.RONCHIGRAM_DIFFUSE_SIGMA_RAD/self.pixel_angles, mode="nearest")
+                if halo is None else xp.asarray(halo))
         base = (1-diffuse)*real + diffuse*(.7*halo + .3*vacuum_level)
         levels = xp.asarray(self.levels, dtype=xp.float32)
         lower = xp.clip(xp.searchsorted(levels, thickness, side="right")-1, 0, len(self.levels)-2)

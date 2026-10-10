@@ -1,0 +1,51 @@
+{
+  "seed": 20261010,
+  "particle_count": 1000,
+  "coordinate_unit": "nm",
+  "source_stl": "hexagonal_prism_on_lacey_carbon_with_copper_grid.stl",
+  "source_sha256": "b90b76a9652312d4755c92eefdf79182f5abb7f16a1d339b0744b454f1987aad",
+  "stl_file": "1000_hexagonal_prisms_on_lacey_carbon_with_copper_grid.stl",
+  "stl_sha256": "34d00ee68a068d5f4efb3b07b8b430ff548a24236f642da13bc494d627c5226e",
+  "carbon_size_nm": [
+    54000,
+    54000,
+    5
+  ],
+  "grid_size_nm": [
+    85000,
+    85000,
+    10000
+  ],
+  "size_distribution": {
+    "type": "truncated Lorentzian (Cauchy)",
+    "peak_nm": 300.0,
+    "hwhm_nm": 100.0,
+    "fwhm_nm": 200.0,
+    "minimum_nm": 50.0,
+    "maximum_nm": 1000.0,
+    "sampling": "inverse CDF"
+  },
+  "max_stack_height_nm": 5000.0,
+  "max_particle_height_above_carbon_nm": 2496.0880745029904,
+  "height_limit_rejected_positions": 0,
+  "orientation_convention": "Cartesian [abc], integers 0..100; nonzero tilt, c=0 allowed; local +Z is base normal",
+  "euler_convention": "active extrinsic xyz in degrees; use rotation_matrix_local_to_lab for unambiguous transforms",
+  "stack_probability": 0.25,
+  "stacked_count": 236,
+  "stacking_method": "vertical contact of convex polyhedra; no particle interpenetration; not a mechanical equilibrium simulation",
+  "max_stack_level": 3,
+  "bounds_nm": [
+    [
+      -42500.0,
+      -42500.0,
+      0.0
+    ],
+    [
+      42500.0,
+      42500.0,
+      10000.0
+    ]
+  ],
+  "faces": 601508,
+  "watertight": true
+}

@@ -256,6 +256,15 @@ class AberrationsController:
 
         return numpy.zeros((height, width))
 
+    def ray_coordinates(self):
+        """Reuse the exact ray map of the last apply, without evaluating rays again."""
+        height, width = self.__height, self.__width
+        theta, max_defocus = self.__theta, self._source_scale
+        max_chi = max_defocus*theta*theta*(1-((1-1/width)**2+(1-1/height)**2)/2)
+        dy = height/2/max_chi*(2*theta/(height-1))*self.__coefficients.get('c0b', 0.)
+        dx = width/2/max_chi*(2*theta/(width-1))*self.__coefficients.get('c0a', 0.)
+        return self.__c[0]+dy, self.__c[1]+dx
+
     def source_displacement(self, position, image_shape):
         """Relative source coordinates of a displayed pixel and image centre.
 
@@ -366,6 +375,10 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         self.__line_renderer_failed = False
 
     def close(self) -> None:
+        if hasattr(self, '_multi_crystal_cache'):
+            self._multi_crystal_cache.clear()
+        if hasattr(self, '_multi_bands_cache'):
+            self._multi_bands_cache.clear()
         self.__line_renderer = None
         self.__contrast_composer = None
         self.__kikuchi_pattern = None
@@ -375,9 +388,9 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         self.noise.clear_gpu_cache()
         super().close()
 
-    def _source_image(self, readout_area, binning_shape, *, crystalline=False):
+    def _source_image(self, readout_area, binning_shape, *, crystalline=False, sample=None):
         """Cache the sphere projection independently of probe/tilt/defocus."""
-        sample = self.instrument.scan_data_generator.sample
+        sample = sample if sample is not None else self.instrument.scan_data_generator.sample
         SampleGeometry.prepare_sample(sample, self.instrument)
         offset_m = self.instrument.stage_position_m
         sphere = isinstance(sample, SampleSimulator.SphericalParticleSample)
@@ -423,7 +436,9 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             return None
         if self.instrument.value_manager.is_blanked:
             return None
-        displacement = self.__aberrations_controller.source_displacement(position, image_shape)
+        # Undo the display rotation before converting an image pixel to a ray.
+        raw_position = Geometry.FloatPoint(image_shape[0]-1-position.y, image_shape[1]-1-position.x)
+        displacement = self.__aberrations_controller.source_displacement(raw_position, image_shape)
         if displacement is None:
             return None
         area = settings.readout_area
@@ -431,8 +446,10 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             y=displacement.y*self.__source_fov_nm*area.height/self._sensor_dimensions.height*1e-9,
             x=displacement.x*self.__source_fov_nm*area.width/self._sensor_dimensions.width*1e-9)
 
-    def _apply_kikuchi(self, data, readout_area, binning_shape, frame_settings, scan_context, aberrations=None):
-        sample = self.instrument.scan_data_generator.sample
+    def _apply_kikuchi(self, data, readout_area, binning_shape, frame_settings, scan_context, aberrations=None, sample=None, crystal_data=None, band_area=None, halo=None):
+        sample = sample if sample is not None else self.instrument.scan_data_generator.sample
+        if hasattr(sample, 'visible_indices'):
+            return self._apply_multiple_crystals(data, readout_area, binning_shape, frame_settings, scan_context, aberrations, sample)
         if not getattr(sample, 'crystal_cif_path', None):
             return data, {}
         manager = typing.cast(InstrumentDevice_.ValueManager, self.instrument.value_manager)
@@ -442,9 +459,11 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         composite = hasattr(sample, 'plot_crystal_features')
         thickness_nm = (sample.crystal_thickness_at(position) if composite else
             sum(feature.thickness_at(position) for feature in sample.features))
-        crystal_data = data
-        if composite:
-            source = self._source_image(readout_area, binning_shape, crystalline=True)
+        supplied_crystal = crystal_data is not None
+        if not supplied_crystal:
+            crystal_data = data
+        if composite and not supplied_crystal:
+            source = self._source_image(readout_area, binning_shape, crystalline=True, sample=sample)
             crystal_data = self.__aberrations_controller.apply(aberrations, source)
         sample_rotation = getattr(sample, 'crystal_rotation', None)
         rotation_key = tuple(numpy.asarray(sample_rotation).ravel()) if sample_rotation is not None else ()
@@ -466,21 +485,41 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         vacuum_level = 100*binning_shape.height*binning_shape.width
         if not bool(((crystal_data > 0) & (crystal_data < vacuum_level-1e-4)).any()):
             return data, metadata
-        calibrations = self.get_dimensional_calibrations(readout_area, binning_shape)
+        calibrations = self._raw_dimensional_calibrations(readout_area, binning_shape)
         y_rad = calibrations[0].offset + numpy.arange(data.shape[0])*calibrations[0].scale
         x_rad = calibrations[1].offset + numpy.arange(data.shape[1])*calibrations[1].scale
+        angular_y, angular_x = y_rad, x_rad
+        if band_area is not None:
+            full_calibrations = self._raw_dimensional_calibrations(band_area, binning_shape)
+            angular_y = full_calibrations[0].offset+numpy.arange(band_area.height//binning_shape.height)*full_calibrations[0].scale
+            angular_x = full_calibrations[1].offset+numpy.arange(band_area.width//binning_shape.width)*full_calibrations[1].scale
+        max_angle = math.atan(math.hypot(math.tan(max(abs(angular_x))), math.tan(max(abs(angular_y)))))
         key = (sample.crystal_cif_path, tuple(sample.zone_axis), rotation_key, voltage, tilt.x, tilt.y,
                tuple(data.shape), tuple((c.offset, c.scale) for c in calibrations),
                SimulationSettings.KIKUCHI_D_MIN_ANGSTROM, SimulationSettings.KIKUCHI_MAX_BANDS,
                SimulationSettings.RONCHIGRAM_BACKEND,
                SimulationSettings.KIKUCHI_BROADENING_RAD_AT_100_NM,
-               SimulationSettings.RONCHIGRAM_PATTERN_CACHE_BYTES)
+               SimulationSettings.RONCHIGRAM_PATTERN_CACHE_BYTES, max_angle)
         if key != self.__kikuchi_cache_key:
             crystal = KikuchiModel.load_crystal(sample.crystal_cif_path)
-            visible = KikuchiModel.bands(crystal, voltage, tuple(sample.zone_axis), tilt.x, tilt.y,
-                max_angle_rad=math.atan(math.hypot(math.tan(max(abs(x_rad))), math.tan(max(abs(y_rad))))),
-                d_min_angstrom=SimulationSettings.KIKUCHI_D_MIN_ANGSTROM,
-                max_bands=SimulationSettings.KIKUCHI_MAX_BANDS, sample_rotation=sample_rotation)
+            band_key = (sample.crystal_cif_path, tuple(sample.zone_axis), voltage, tilt.x, tilt.y, max_angle,
+                        SimulationSettings.KIKUCHI_D_MIN_ANGSTROM, SimulationSettings.KIKUCHI_MAX_BANDS)
+            visible = None
+            if supplied_crystal:
+                # Pixel bounds change while focusing, crystal orientation does
+                # not. Reuse reflectors independently of each cropped image.
+                if getattr(self, '_multi_bands_key', None) != band_key:
+                    self._multi_bands_key = band_key
+                    self._multi_bands_cache = {}
+                visible = self._multi_bands_cache.get(rotation_key)
+            if visible is None:
+                visible = KikuchiModel.bands(crystal, voltage, tuple(sample.zone_axis), tilt.x, tilt.y,
+                    max_angle_rad=max_angle, d_min_angstrom=SimulationSettings.KIKUCHI_D_MIN_ANGSTROM,
+                    max_bands=SimulationSettings.KIKUCHI_MAX_BANDS, sample_rotation=sample_rotation)
+                if supplied_crystal:
+                    if len(self._multi_bands_cache) >= 1000:
+                        self._multi_bands_cache.clear()
+                    self._multi_bands_cache[rotation_key] = visible
             # Bound interactive raster work. Width is >=0.35 mrad; a 512 grid
             # resolves it at the default camera angle, then interpolate to readout.
             height, width = min(512, data.shape[0]), min(512, data.shape[1])
@@ -509,7 +548,7 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                 (calibrations[0].scale, calibrations[1].scale), SimulationSettings.RONCHIGRAM_BACKEND)
             self.__kikuchi_cache_key = key
         pattern, metadata['band_count'] = self.__kikuchi_pattern
-        composed, contrast_metadata = self.__contrast_composer.compose(crystal_data, vacuum_level)
+        composed, contrast_metadata = self.__contrast_composer.compose(crystal_data, vacuum_level, halo=halo)
         if composite:
             xp = self.__contrast_composer.xp
             real = xp.asarray(data) if xp is not numpy or isinstance(data, numpy.ndarray) else data.get()
@@ -522,6 +561,100 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
         metadata.update(contrast_metadata)
         metadata['probe_diffusion_sigma_rad'] = float(KikuchiModel.diffusion_sigma_rad(thickness_nm))
         return data, metadata
+
+    def _apply_multiple_crystals(self, data, area, binning, settings, context, aberrations, sample):
+        # Cull in the physical source footprint, independent of scan FoV.
+        # Auto uses GPU for the shared large ray map, then CPU for tiny local
+        # compositions where hundreds of CUDA launches would cost more.
+        if SimulationSettings.RONCHIGRAM_BACKEND != 'gpu' and not isinstance(data, numpy.ndarray):
+            data = data.get()
+        fov = self.__source_fov_nm
+        size = Geometry.FloatSize(fov*area.height/self._sensor_dimensions.height,
+                                  fov*area.width/self._sensor_dimensions.width)
+        center = Geometry.FloatPoint(fov*(area.center.y/self._sensor_dimensions.height-.5),
+                                     fov*(area.center.x/self._sensor_dimensions.width-.5))
+        x, y = sample.axes(self.instrument.stage_position_m, size, Geometry.FloatPoint(), center,
+                           Geometry.IntSize(area.height, area.width))
+        from nion.usim_device import ParticleProjection
+        _, _, pieces = sample._maps(self.instrument.stage_position_m, size, Geometry.FloatPoint(), center,
+                                   Geometry.IntSize(area.height, area.width))
+        mapped, inside, mapping_backend = ParticleProjection.mapped_particles(pieces, (area.height, area.width),
+            self.__aberrations_controller.ray_coordinates(), binning.as_tuple())
+        result = data.copy()
+        records = []
+        cache = getattr(self, '_multi_crystal_cache', None)
+        if cache is None:
+            from collections import OrderedDict
+            cache = self._multi_crystal_cache = OrderedDict()
+        def cache_bytes(entry):
+            pattern, composer = entry[1][0], entry[2]
+            return pattern.nbytes+composer.pattern.nbytes+(composer.bank.nbytes if composer.bank is not None else 0)
+        cached_bytes = sum(cache_bytes(entry) for entry in cache.values())
+        vacuum = 100*binning.height*binning.width
+        calibrations = self._raw_dimensional_calibrations(area, binning)
+        jobs = []
+        for index, (pixels, attenuation) in mapped.items():
+            # Only pixels traversing this crystal change. Include a Gaussian
+            # halo so local composition retains the full-frame boundary model.
+            thickness_max = -SimulationSettings.RONCHIGRAM_TRANSMISSION_LENGTH_NM*numpy.log(
+                max(1-attenuation.max()/vacuum, 1e-12))
+            blur_level = 100.*2**max(0, math.ceil(math.log2(max(thickness_max/100., 1.))))
+            sigma_rad = max(SimulationSettings.RONCHIGRAM_DIFFUSE_SIGMA_RAD,
+                SimulationSettings.KIKUCHI_BROADENING_RAD_AT_100_NM*math.sqrt(blur_level/100.))
+            pad_y = int(math.ceil(4*sigma_rad/abs(calibrations[0].scale)))+2
+            pad_x = int(math.ceil(4*sigma_rad/abs(calibrations[1].scale)))+2
+            rows, columns = numpy.unravel_index(pixels, data.shape)
+            top, bottom = max(0, int(rows.min())-pad_y), min(data.shape[0], int(rows.max())+pad_y+1)
+            left, right = max(0, int(columns.min())-pad_x), min(data.shape[1], int(columns.max())+pad_x+1)
+            # A one-pixel focus shift should not rebuild every pattern and
+            # blur bank. Expand to stable tiles while keeping exact ray data.
+            tile = 32
+            top, left = top//tile*tile, left//tile*tile
+            bottom = min(data.shape[0], (bottom+tile-1)//tile*tile)
+            right = min(data.shape[1], (right+tile-1)//tile*tile)
+            region = slice(top, bottom), slice(left, right)
+            projected = numpy.where(inside[region], vacuum, 0.).astype(numpy.float32)
+            projected[rows-top, columns-left] -= attenuation
+            cropped_area = Geometry.IntRect(origin=Geometry.IntPoint(area.top+top*binning.height, area.left+left*binning.width),
+                size=Geometry.IntSize((bottom-top)*binning.height, (right-left)*binning.width))
+            jobs.append((index, region, projected, cropped_area))
+        halos = (RonchigramContrast.batched_halos([job[2] for job in jobs],
+                 (calibrations[0].scale, calibrations[1].scale), vacuum) if mapping_backend == 'gpu'
+                 else [None]*len(jobs))
+        for (index, region, projected, cropped_area), halo in zip(jobs, halos):
+            crystal = sample.crystal(index)
+            cache_id = (id(sample), int(index))
+            previous = cache.pop(cache_id, None)
+            if previous is None:
+                self.__kikuchi_cache_key = None
+            else:
+                cached_bytes -= cache_bytes(previous)
+                self.__kikuchi_cache_key, self.__kikuchi_pattern, self.__contrast_composer = previous
+            composed, metadata = self._apply_kikuchi(data[region], cropped_area, binning, settings, context, aberrations,
+                                                    sample=crystal, crystal_data=projected, band_area=area, halo=halo)
+            if metadata.get('band_count', 0):
+                if isinstance(result, numpy.ndarray) and not isinstance(composed, numpy.ndarray):
+                    composed = composed.get()
+                elif not isinstance(result, numpy.ndarray) and isinstance(composed, numpy.ndarray):
+                    import cupy as cp
+                    composed = cp.asarray(composed)
+                result[region] += composed-data[region]
+                metadata['particle_id'] = int(index)+1
+                records.append(metadata)
+                cache[cache_id] = (self.__kikuchi_cache_key, self.__kikuchi_pattern, self.__contrast_composer)
+                cached_bytes += cache_bytes(cache[cache_id])
+            # One shared budget instead of four entries that thrash at every
+            # large-view frame. Count both host patterns and device blur banks.
+            while len(cache) > 1 and cached_bytes > SimulationSettings.RONCHIGRAM_PATTERN_CACHE_BYTES:
+                cached_bytes -= cache_bytes(cache.popitem(last=False)[1])
+        # The single-crystal cache must not retain the last particle's key.
+        self.__kikuchi_cache_key = None
+        return result.clip(0), {'model': 'geometric_kikuchi_multi_crystal', 'crystals': records,
+            'visible_particle_ids': [int(i)+1 for i in sample.visible_indices(x, y)],
+            'mapped_particle_count': len(mapped),
+            'mapping_backend': mapping_backend,
+            'diffusion_backend': 'gpu' if halos and all(halo is not None for halo in halos) else 'cpu',
+            'band_count': sum(record['band_count'] for record in records)}
 
     @property
     def _tv_pixel_angle(self) -> float:
@@ -626,6 +759,11 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                 elif self.instrument.GetVal("S_MOA") > 0:
                     self._draw_aperture(data, binning_shape, enlarge_by=0.1)
 
+            # Align the camera display orientation with HAADF. Rotate the
+            # complete image, including real-space contrast and diffraction.
+            data = data[::-1, ::-1]
+            if metadata:
+                metadata['display_rotation_deg'] = 180
             intensity_calibration = Calibration.Calibration(units="counts")
             dimensional_calibrations = self.get_dimensional_calibrations(readout_area, binning_shape)
 
@@ -644,6 +782,13 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
             metadata=self.__cached_frame.metadata, timestamp=result.timestamp)
 
     def get_dimensional_calibrations(self, readout_area: typing.Optional[Geometry.IntRect], binning_shape: typing.Optional[Geometry.IntSize]) -> typing.Sequence[Calibration.Calibration]:
+        area = readout_area or Geometry.IntRect(origin=Geometry.IntPoint(), size=self._sensor_dimensions)
+        bins = binning_shape or Geometry.IntSize(1, 1)
+        raw = self._raw_dimensional_calibrations(area, bins)
+        return [Calibration.Calibration(offset=c.offset+(length-1)*c.scale, scale=-c.scale, units=c.units)
+                for c, length in zip(raw, (area.height//bins.height, area.width//bins.width))]
+
+    def _raw_dimensional_calibrations(self, readout_area, binning_shape):
         area = readout_area or Geometry.IntRect(origin=Geometry.IntPoint(), size=self._sensor_dimensions)
         bins = binning_shape or Geometry.IntSize(1, 1)
         scale_y = self._tv_pixel_angle * bins.height
