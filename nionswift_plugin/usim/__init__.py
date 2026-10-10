@@ -14,7 +14,7 @@ def run() -> None:
 
     acquisition_context_configuration = (
         DeviceConfiguration.AcquisitionContextConfiguration(
-            sample_index=6,  # STL sample.
+            sample_index=9,  # 1000CathodeParticleOnCarbon.
             set_configuration_location=False
         )
     )

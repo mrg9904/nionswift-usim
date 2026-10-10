@@ -141,6 +141,7 @@ class ScanModule(scan_base.ScanModule):
         generator = typing.cast(InstrumentDevice_.ScanDataGenerator, instrument.scan_data_generator)
         stage, initial_fov_nm = generator.sample.initial_view
         instrument.stage_position_m = stage
+        instrument.SetVal("stage_z_m", getattr(generator.sample, "initial_stage_z_m", 0.))
         scan_modes = (
             scan_base.ScanSettingsMode(_("Fast"), "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=initial_fov_nm)),
             scan_base.ScanSettingsMode(_("Slow"), "slow", ScanDevice.ScanFrameParameters(pixel_size=(512, 512), pixel_time_us=1, fov_nm=initial_fov_nm)),
@@ -156,6 +157,7 @@ class ScanModule(scan_base.ScanModule):
         generator = typing.cast(InstrumentDevice_.ScanDataGenerator, self.__instrument.scan_data_generator)
         stage, fov_nm = generator.sample.initial_view
         self.__instrument.stage_position_m = stage
+        self.__instrument.SetVal("stage_z_m", getattr(generator.sample, "initial_stage_z_m", 0.))
         for index in range(3):
             parameters = self.settings.get_frame_parameters(index)
             parameters.fov_nm = fov_nm

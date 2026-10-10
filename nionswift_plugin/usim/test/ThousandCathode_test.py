@@ -31,7 +31,7 @@ class TestThousandCathode(unittest.TestCase):
             initial = np.array(sample.model_info['particles'][i]['base_normal_abc_initial'], float)
             np.testing.assert_allclose(np.asarray(sample.model_info['initial_rotation_matrix']) @ (initial/np.linalg.norm(initial)),
                                        sample.rotations[i, :, 2])
-        offset, _ = sample.initial_view
+        offset = Geometry.FloatPoint(x=-sample.center_nm[0]*1e-9, y=-sample.center_nm[1]*1e-9)
         args = offset, Geometry.FloatSize(2000, 2000), Geometry.FloatPoint(), Geometry.FloatPoint(), Geometry.IntSize(64, 64)
         with mock.patch.object(sample, 'crystal', wraps=sample.crystal) as project:
             sample._projection_key = None
@@ -106,12 +106,16 @@ class TestThousandCathode(unittest.TestCase):
             self.assertEqual(generator.sample.title, '1000CathodeParticleOnCarbon')
             stage, fov = generator.sample.initial_view
             self.assertEqual(context.instrument.stage_position_m, stage)
+            self.assertEqual(stage, Geometry.FloatPoint(x=938e-9, y=-6820e-9))
+            self.assertAlmostEqual(context.instrument.GetVal('stage_z_m'), 600e-6)
             for index in range(3):
                 self.assertEqual(context.scan_hardware_source.get_frame_parameters(index).fov_nm, fov)
             parameters = ScanDevice.ScanFrameParameters(pixel_size=(64, 64), fov_nm=fov, pixel_time_us=1.)
             image = generator.generate_scan_data(context.instrument, parameters)
             self.assertTrue(np.isfinite(image).all())
             self.assertGreater(float(image.std()), 0.)
+            generator.sample_index = 0
+            self.assertEqual(context.instrument.GetVal('stage_z_m'), 0.)
 
     def test_sparse_gpu_depths_match_cpu_focus(self):
         try:

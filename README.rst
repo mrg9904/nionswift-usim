@@ -423,9 +423,13 @@ tilt computation independently of UI refresh and exposure time; use ``--size
 Sample-specific initial views
 -----------------------------
 
-On startup and each specimen change, the ten-particle **STL Depth Sample** uses
+The startup specimen is **1000CathodeParticleOnCarbon**, with Stage X=938 nm,
+Y=-6820 nm, Z=600 um and a 2000 nm scan FoV. Selecting this sample restores
+that view; other samples reset Stage Z to zero when selected.
+On each specimen change, the ten-particle **STL Depth Sample** uses
 stage x=1222 nm, y=279 nm and FoV 10000 nm. Other samples use FoV 200 nm,
-at stage (0, 0) except SingleCathodeOnCarbon, which centers its prism.
+at stage (0, 0) except SingleCathodeOnCarbon, which centers its prism, and
+1000CathodeParticleOnCarbon, which uses the view above.
 Fast/Slow/Record profiles and scan center are updated
 on selection, while pixel sizes and dwell times remain as configured.
 Re-selecting the already active sample does not reset a manually adjusted view.
@@ -528,7 +532,8 @@ from the particle stack limit. ``--size-peak-nm``, ``--size-hwhm-nm`` and
 ``--max-stack-height-nm`` configure these parameters.
 
 Select **1000CathodeParticleOnCarbon** to view this assembly in HAADF, EELS,
-and Ronchigram. Its initial view centers particle #1 with a 2000 nm scan FoV.
+and Ronchigram. Its initial view uses Stage X=938 nm, Y=-6820 nm and Z=600 um,
+with a 2000 nm scan FoV, to expose the central grid opening in the Ronchigram.
 Each crystal uses the existing NNMTO CIF with its own saved rotation; local
 [001] follows its prism base normal. Stage tilt rotates both geometry and
 crystal orientation. The SingleCathodeOnCarbon sample remains available.

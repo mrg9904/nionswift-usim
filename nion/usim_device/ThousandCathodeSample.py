@@ -75,7 +75,11 @@ class ThousandCathodeSample(SingleCathodeSample.SingleCathodeSample):
 
     @property
     def initial_view(self):
-        return Geometry.FloatPoint(x=-self.center_nm[0]*1e-9, y=-self.center_nm[1]*1e-9), 2000.
+        return Geometry.FloatPoint(x=938e-9, y=-6820e-9), 2000.
+
+    @property
+    def initial_stage_z_m(self):
+        return 600e-6
 
     def _update_bounds(self):
         vertices = (self.vertices-self.center_nm) @ SampleGeometry.stage_rotation(self.stage_tilt_rad).T+self.center_nm
