@@ -22,6 +22,7 @@ import trimesh
 
 from create_lacey_carbon import SAMPLES, STL_SAMPLES, verify
 from nion.usim_device import SampleGeometry
+from cathode_layout import apply_layout, save_arrays, save_layout_preview
 
 
 def truncated_lorentzian(rng, size, peak=300., hwhm=100.):
@@ -118,32 +119,6 @@ class SpatialGrid:
             self.cells.setdefault(key, set()).add(index)
 
 
-def save_overview(info, output):
-    """Show the top and side projections at equal X/Z scale without plot deps."""
-    image = Image.new('RGB', (1500, 1000), 'white')
-    image.paste(Image.open(output/'top_view.png').resize((800, 835), Image.Resampling.LANCZOS), (0, 50))
-    draw = ImageDraw.Draw(image)
-    scale = min(6.5, 800/(info['bounds_nm'][1][2]/1000.))
-    def side(points):
-        return [(float(1150+x/1000.*scale), float(900-z/1000.*scale)) for x, z in points]
-    for r in sorted(info['particles'], key=lambda r: r['center_nm'][1]):
-        hull = MultiPoint(np.asarray(r['vertices_lab_nm'])[:, [0, 2]]).convex_hull
-        level = r['stack_level']
-        draw.polygon(side(hull.exterior.coords), fill=(80+level*3, 150, max(60, 210-level*3)), outline='#405050')
-    for left, right in ((-42500, -27000), (27000, 42500)):
-        draw.polygon(side([(left, 0), (right, 0), (right, 10000), (left, 10000)]), fill='#b77942')
-    draw.line(side([(-27000, 0), (27000, 0)]), fill='gray', width=2)
-    draw.text((70, 20), 'Top view: carbon opening 54 um; total grid 85 um', fill='black')
-    draw.text((910, 20), 'Side projection (X-Z, equal scale)', fill='black')
-    draw.text((910, 45), f'Particle maximum above carbon: {info["max_particle_height_above_carbon_nm"]/1000.:.2f} um', fill='black')
-    step = 2 if info['bounds_nm'][1][2] <= 10000 else 50
-    for z in range(0, int(info['bounds_nm'][1][2]/1000.)+1, step):
-        y = 900-z*scale
-        draw.line((880, y, 890, y), fill='black')
-        draw.text((825, y-6), f'{z} um', fill='black')
-    image.save(output/'overview.png')
-
-
 def save_size_distribution(info, output):
     image = Image.new('RGB', (1400, 650), 'white')
     draw = ImageDraw.Draw(image)
@@ -175,7 +150,9 @@ def save_size_distribution(info, output):
     image.save(output/'size_distribution.png')
 
 
-def generate(count, seed, stack_probability, output, stl_output, peak=300., hwhm=100., max_stack_height_nm=5000.):
+def generate(count, seed, stack_probability, output, stl_output, peak=300., hwhm=100., max_stack_height_nm=5000., initial_rotation_deg=60., grid_tiles=3):
+    if not np.isfinite(initial_rotation_deg) or grid_tiles < 1 or grid_tiles % 2 != 1:
+        raise ValueError('Rotation must be finite and grid count must be positive and odd')
     rng = np.random.default_rng(seed)
     source = STL_SAMPLES/'hexagonal_prism_on_lacey_carbon_with_copper_grid.stl'
     assembly = trimesh.load_mesh(source)
@@ -241,8 +218,8 @@ def generate(count, seed, stack_probability, output, stl_output, peak=300., hwhm
         records.append(record)
         if (index+1) % 50 == 0:
             print(f'Placed {index+1}/{count}; stacked: {sum(r["stacked"] for r in records)}', flush=True)
-    combined = trimesh.util.concatenate([support, *particles])
-    expected_volume = support.volume+sum(p.volume for p in particles)
+    combined, layout = apply_layout(support, records, initial_rotation_deg, grid_tiles)
+    expected_volume = support.volume+sum(p.volume for p in particles)+(grid_tiles**2-1)*(85000.**2-54000.**2)*10000.
     verify(combined, expected_volume)
     stl_output.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
@@ -251,7 +228,8 @@ def generate(count, seed, stack_probability, output, stl_output, peak=300., hwhm
     combined.export(path)
     loaded = trimesh.load_mesh(path)
     verify(loaded, expected_volume)
-    np.testing.assert_allclose(np.ptp(loaded.vertices[:, :2], axis=0), [85000., 85000.])
+    expected_xy = grid_tiles*85000.*np.abs(np.asarray(layout['initial_rotation_matrix'])[:2, :2]).sum(axis=1)
+    np.testing.assert_allclose(np.ptp(loaded.vertices[:, :2], axis=0), expected_xy, atol=.05)
     info = dict(seed=seed, particle_count=count, coordinate_unit='nm',
         source_stl=source.name, source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
         stl_file=name, stl_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -268,40 +246,10 @@ def generate(count, seed, stack_probability, output, stl_output, peak=300., hwhm
         max_stack_level=max(r['stack_level'] for r in records),
         bounds_nm=loaded.bounds.tolist(), faces=len(loaded.faces), watertight=bool(loaded.is_watertight),
         particles=records)
+    info.update(layout)
     (stl_output/f'{count}_cathodes.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
-    np.savez_compressed(stl_output/f'{count}_cathodes.npz',
-        id=np.arange(1, count+1), center_nm=np.array([r['center_nm'] for r in records]),
-        base_edge_lengths_nm=np.array([r['base_edge_lengths_nm'] for r in records]),
-        height_nm=np.array([r['height_nm'] for r in records]),
-        normal_abc=np.array([r['base_normal_abc'] for r in records]),
-        rotation_matrix=np.array([r['rotation_matrix_local_to_lab'] for r in records]),
-        euler_xyz_deg=np.array([r['euler_xyz_deg'] for r in records]),
-        vertices_lab_nm=np.array([r['vertices_lab_nm'] for r in records]),
-        transform_base_local_to_lab=np.array([r['transform_base_local_to_lab'] for r in records]),
-        contact_position_nm=np.array([r['contact_position_nm'] for r in records]),
-        contact_particle_id=np.array([r['contact_particle_id'] for r in records]),
-        stack_level=np.array([r['stack_level'] for r in records]),
-        max_stack_height_nm=np.array(max_stack_height_nm),
-        size_peak_nm=np.array(peak), size_hwhm_nm=np.array(hwhm),
-        seed=np.array(seed), coordinate_unit=np.array('nm'))
-    image = Image.new('RGB', (1600, 1670), 'white')
-    draw = ImageDraw.Draw(image)
-    def screen(points):
-        return [(float(50+(x+42500)/85000*1500), float(50+(42500-y)/85000*1500)) for x, y in points]
-    draw.rectangle((50, 50, 1550, 1550), fill='#b77942')
-    draw.polygon(screen([[-27000, -27000], [27000, -27000], [27000, 27000], [-27000, 27000]]), fill='white')
-    for polygon in ([film] if film.geom_type == 'Polygon' else film.geoms):
-        draw.polygon(screen(polygon.exterior.coords), fill='#555555')
-        for ring in polygon.interiors:
-            draw.polygon(screen(ring.coords), fill='white')
-    for index in sorted(range(count), key=lambda i: records[i]['center_nm'][2]):
-        level = records[index]['stack_level']
-        color = (240, max(60, 180-level*5), 55)
-        draw.polygon(screen(footprints[index].exterior.coords), fill=color, outline='#70401a')
-    draw.text((50, 1575), f'{count} irregular tilted hexagonal prisms; carbon 54 um; copper outside 85 um', fill='black')
-    draw.text((50, 1600), f'Stacked: {info["stacked_count"]}; max stack level: {info["max_stack_level"]}; seed: {seed}', fill='black')
-    image.save(output/'top_view.png')
-    save_overview(info, output)
+    save_arrays(info, stl_output)
+    save_layout_preview(info, support, output, film=film)
     save_size_distribution(info, output)
     summary = {k: v for k, v in info.items() if k != 'particles'}
     (output/'model_summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
@@ -316,6 +264,8 @@ if __name__ == '__main__':
     parser.add_argument('--size-peak-nm', type=float, default=300.)
     parser.add_argument('--size-hwhm-nm', type=float, default=100.)
     parser.add_argument('--max-stack-height-nm', type=float, default=5000.)
+    parser.add_argument('--initial-rotation-deg', type=float, default=60.)
+    parser.add_argument('--grid-tiles', type=int, default=3)
     parser.add_argument('--output', type=Path, default=SAMPLES/'thousand_cathodes')
     parser.add_argument('--stl-output', type=Path, default=STL_SAMPLES)
     args = parser.parse_args()
@@ -325,4 +275,4 @@ if __name__ == '__main__':
             and args.size_hwhm_nm > 0 and np.isfinite(args.max_stack_height_nm) and args.max_stack_height_nm > 0):
         parser.error('peak must be in 50..1000 nm; width and stack height must be positive and finite')
     generate(args.count, args.seed, args.stack_probability, args.output, args.stl_output,
-             args.size_peak_nm, args.size_hwhm_nm, args.max_stack_height_nm)
+             args.size_peak_nm, args.size_hwhm_nm, args.max_stack_height_nm, args.initial_rotation_deg, args.grid_tiles)

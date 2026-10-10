@@ -4,6 +4,7 @@ Uses the separating-axis theorem on float32 STL vertices rather than the
 linear-programming placement solver. Tolerance covers STL coordinate rounding.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import numpy as np
@@ -20,6 +21,8 @@ def validate(root, count=1000):
     assert len(records) == count
     np.testing.assert_array_equal(data['id'], np.arange(1, count+1))
     vertices = np.array([r['vertices_lab_nm'] for r in records])
+    initial_rotation = np.asarray(info.get('initial_rotation_matrix', np.eye(3)))
+    np.testing.assert_allclose(initial_rotation.T@initial_rotation, np.eye(3), atol=1e-12)
     normals, directions = [], []
     for i, record in enumerate(records):
         v = vertices[i]
@@ -30,9 +33,14 @@ def validate(root, count=1000):
         assert 50. <= record['height_nm'] <= 1000.
         assert v[:, 2].max() <= 5.+info['max_stack_height_nm']+1e-7
         np.testing.assert_allclose(lengths, record['base_edge_lengths_nm'], atol=1e-7)
-        normal = np.array(record['base_normal_abc'], float)
-        assert (normal >= 0).all() and (normal <= 100).all() and normal[:2].any()
-        normal /= np.linalg.norm(normal)
+        initial_normal = np.array(record.get('base_normal_abc_initial', record['base_normal_abc']), float)
+        assert (initial_normal >= 0).all() and (initial_normal <= 100).all() and initial_normal[:2].any()
+        np.testing.assert_allclose(initial_normal, np.rint(initial_normal), atol=1e-12)
+        lab_direction = initial_rotation @ initial_normal
+        np.testing.assert_allclose(record['base_normal_abc'], lab_direction, atol=1e-10)
+        np.testing.assert_allclose(data['normal_abc'][i], lab_direction, atol=1e-10)
+        normal = lab_direction/np.linalg.norm(lab_direction)
+        np.testing.assert_allclose(record['base_normal_unit_xyz'], normal, atol=1e-12)
         r = np.array(record['rotation_matrix_local_to_lab'])
         np.testing.assert_allclose(r.T@r, np.eye(3), atol=1e-12)
         np.testing.assert_allclose(r[:, 2], normal, atol=1e-12)
@@ -45,7 +53,7 @@ def validate(root, count=1000):
         np.testing.assert_allclose(transform[:3, :3], r, atol=1e-12)
         np.testing.assert_allclose(transform[:3, 3], record['bottom_face_center_nm'], atol=1e-8)
         np.testing.assert_allclose(data['transform_base_local_to_lab'][i], transform, atol=1e-12)
-        assert np.max(np.abs(v[:, :2])) <= 27000.+1e-7
+        assert np.max(np.abs((v @ initial_rotation)[:, :2])) <= 27000.+1e-7
         contact_id = record['contact_particle_id']
         assert 0 <= contact_id < record['id']
         if contact_id == 0:
@@ -56,11 +64,25 @@ def validate(root, count=1000):
         normals.append(np.vstack((np.cross(edge_axes[:3], normal), normal)))
     # Verify the actual binary STL's ordered particle triangles, not just JSON.
     path = root/info['stl_file']
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == info['stl_sha256']
     face_dtype = np.dtype([('normal', '<f4', (3,)), ('vertices', '<f4', (3, 3)), ('attribute', '<u2')])
     raw = np.fromfile(path, dtype=face_dtype, offset=84)
     support = raw['vertices'][:-count*20]
     film = union_all([Polygon(t[:, :2]) for t in support[np.all(np.isclose(support[:, :, 2], 5., atol=1e-6), axis=1)]])
     contact_region = film.buffer(.05)
+    if info.get('grid_tiles_per_axis', 1) > 1:
+        tiles = info['grid_tiles_per_axis']
+        copper = union_all([Polygon(t[:, :2]) for t in support[np.all(np.isclose(support[:, :, 2], 10000., atol=1e-6), axis=1)]])
+        assert copper.geom_type == 'Polygon' and len(copper.interiors) == tiles*tiles
+        np.testing.assert_allclose(copper.area, tiles*tiles*(85000.**2-54000.**2), rtol=1e-6)
+        for local, lab in zip(info['grid_tile_centers_local_nm'], info['grid_tile_centers_lab_nm']):
+            np.testing.assert_allclose(np.asarray(local) @ initial_rotation.T, lab, atol=1e-8)
+            assert not copper.covers(Point(lab[:2]))
+            if np.linalg.norm(local) > 0:
+                assert film.distance(Point(lab[:2])) > 30000.
+        unrotated_support = support @ initial_rotation
+        np.testing.assert_allclose(np.ptp(unrotated_support[:, :, :2].reshape(-1, 2), axis=0),
+                                   [tiles*85000., tiles*85000.], atol=.05)
     for record in records:
         if not record['stacked']:
             assert contact_region.covers(Point(record['contact_position_nm'][:2]))

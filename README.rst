@@ -533,6 +533,21 @@ Each crystal uses the existing NNMTO CIF with its own saved rotation; local
 [001] follows its prism base normal. Stage tilt rotates both geometry and
 crystal orientation. The SingleCathodeOnCarbon sample remains available.
 
+The 1000-particle assembly has an initial 60-degree counterclockwise rotation
+about lab Z, looking from +Z. Copper frames repeat at 85 um pitch along the
+rotated grid axes in a 3x3 array, 255x255 um before rotation. Only the central
+54x54 um opening contains carbon and particles; eight other openings are
+vacuum. Touching copper frames are united before extrusion to avoid STL seams.
+The lab XY bounding extent is approximately 348.34x348.34 um after rotation.
+``base_normal_abc_initial`` retains the original integer Cartesian direction;
+``base_normal_abc`` and ``normal_abc`` in NPZ contain its rotated lab vector,
+which can have negative and noninteger components. Crystal-local [001] does
+not change. Saved positions, normals, rotations, Euler angles, contact points
+and transforms all include this initial rotation, which is applied once.
+``tools/update_cathode_layout.py`` updates an existing model without resampling;
+``--rotation-deg`` sets an absolute angle, so rerunning does not accumulate it.
+The generator defaults to ``--initial-rotation-deg 60 --grid-tiles 3``.
+
 Projection first checks particle bounds against the current physical view,
 then rasterizes only intersecting particles, within their pixel rectangles.
 EELS queries only particles under the probe. Ronchigram uses its illuminated

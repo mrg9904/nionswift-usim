@@ -28,6 +28,9 @@ class TestThousandCathode(unittest.TestCase):
         for i in (0, 237, 999):
             normal = np.array(sample.model_info['particles'][i]['base_normal_abc'], float)
             np.testing.assert_allclose(sample.rotations[i, :, 2], normal/np.linalg.norm(normal))
+            initial = np.array(sample.model_info['particles'][i]['base_normal_abc_initial'], float)
+            np.testing.assert_allclose(np.asarray(sample.model_info['initial_rotation_matrix']) @ (initial/np.linalg.norm(initial)),
+                                       sample.rotations[i, :, 2])
         offset, _ = sample.initial_view
         args = offset, Geometry.FloatSize(2000, 2000), Geometry.FloatPoint(), Geometry.FloatPoint(), Geometry.IntSize(64, 64)
         with mock.patch.object(sample, 'crystal', wraps=sample.crystal) as project:
@@ -40,6 +43,24 @@ class TestThousandCathode(unittest.TestCase):
         sample.set_stage_tilt(tilt)
         transformed = (sample.vertices-sample.center_nm) @ SampleGeometry.stage_rotation(tilt).T+sample.center_nm
         np.testing.assert_allclose(sample._bounds[:, 0], transformed.min(axis=1))
+
+    def test_nine_grid_windows_only_center_is_populated(self):
+        sample = self.sample
+        self.assertEqual(sample.model_info['initial_rotation_deg'], 60.)
+        self.assertEqual(sample.model_info['grid_tiles_per_axis'], 3)
+        np.testing.assert_allclose(sample.model_info['overall_grid_size_local_nm'], [255000., 255000., 10000.])
+        rotation = np.asarray(sample.model_info['initial_rotation_matrix'])
+        for center in sample.model_info['grid_tile_centers_local_nm']:
+            if not np.any(center):
+                continue
+            lab = rotation @ center
+            position = Geometry.FloatPoint(x=lab[0]*1e-9, y=lab[1]*1e-9)
+            self.assertEqual(sample.eels_layers_at(position), [])
+            self.assertEqual(len(sample.visible_indices([lab[0]], [lab[1]])), 0)
+            copper = rotation @ (np.asarray(center)+[34000., 0., 0.])
+            layers = sample.eels_layers_at(Geometry.FloatPoint(x=copper[0]*1e-9, y=copper[1]*1e-9))
+            self.assertEqual(len(layers), 1)
+            self.assertAlmostEqual(layers[0].thickness_nm, 10000., places=2)
 
     def test_stacked_material_depths_exclude_vacuum(self):
         sample = self.sample
