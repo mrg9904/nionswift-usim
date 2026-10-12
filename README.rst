@@ -420,6 +420,19 @@ created at the actual specimen thickness instead of being built twice.
 tilt computation independently of UI refresh and exposure time; use ``--size
 1024`` to measure a larger frame.
 
+Batch EELS spectrum imaging
+---------------------------
+
+``EELSCameraSimulator.acquire_spectrum_image`` writes a float32 y,x,energy
+NPY cube in eight-row chunks using the existing EELS compound-Poisson model.
+It supports cropped energy-channel counts, optical-depth binning at 0.01 per
+material, electron shot noise, cached cathode projections and rotated scans.
+The JSON sidecar marks completion/partial data and records approximation limits.
+The simulator still uses a point probe for EELS: defocus is recorded rather
+than broadening its illumination. HAADF pairing and energy-window configuration
+are provided by the tem-automation adapter. Missing high-energy intensity is
+never renormalized into the recorded detector window.
+
 Sample-specific initial views
 -----------------------------
 
@@ -585,3 +598,10 @@ unambiguous orientation. ``tools/validate_thousand_cathodes.py`` independently
 checks the saved STL, array correspondence and solid separation using the
 separating-axis theorem, with 0.05 nm tolerance for float32 STL rounding.
 Top/side previews are in ``tools/samples/thousand_cathodes/``.
+Large-stage-Z Ronchigram overview
+--------------------------------
+
+At absolute Stage Z above 100 um, Ronchigram retains specimen transmission,
+ray geometry, aperture and shot noise but skips per-crystal Kikuchi simulation.
+``RONCHIGRAM_KIKUCHI_MAX_STAGE_Z_M`` in ``SimulationSettings.py`` controls the
+threshold. Small-Z frames resume the existing diffraction model automatically.

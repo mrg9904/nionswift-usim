@@ -187,3 +187,7 @@ KIKUCHI_BROADENING_RAD_AT_100_NM = 0.0008
 RONCHIGRAM_BACKEND = "auto"  # auto, cpu, gpu (CUDA failures fall back to CPU)
 RONCHIGRAM_GPU_MINIMUM_PIXELS = 512 * 512
 RONCHIGRAM_PATTERN_CACHE_BYTES = 256 * 1024 * 1024
+
+# Overview navigation does not need per-crystal diffraction. Keep specimen
+# transmission, ray geometry and shot noise, but skip Kikuchi above |Z|=100 um.
+RONCHIGRAM_KIKUCHI_MAX_STAGE_Z_M = 100e-6

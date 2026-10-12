@@ -11,6 +11,28 @@ from nionswift_plugin.usim.test import KikuchiModel_test
 
 
 class TestRonchigramPerformance(unittest.TestCase):
+    def test_large_stage_z_skips_diffraction_but_keeps_geometry_and_noise(self):
+        fixture = KikuchiModel_test.TestKikuchiModel()
+        fixture.setUp()
+        manager, camera, context, area = fixture.make_camera()
+        try:
+            with mock.patch.object(camera, '_apply_kikuchi', wraps=camera._apply_kikuchi) as diffraction:
+                manager.set_value('stage_z_m', 600e-6)
+                first = camera.get_frame_data(area, Geometry.IntSize(1, 1), .1, context, Geometry.FloatPoint(.5, .5))
+                diffraction.assert_not_called()
+                info = first.metadata['kikuchi_simulation']
+                self.assertFalse(info['kikuchi_enabled'])
+                self.assertTrue(np.isfinite(first.data).all())
+                camera.noise.enabled = True
+                noisy = camera.get_frame_data(area, Geometry.IntSize(1, 1), .1, context, Geometry.FloatPoint(.5, .5))
+                self.assertFalse(np.array_equal(first.data, noisy.data))
+                self.assertIsNotNone(camera.stage_displacement_for_pixel(Geometry.FloatPoint(.5, .5), first.data.shape))
+                manager.set_value('stage_z_m', 0.)
+                camera.get_frame_data(area, Geometry.IntSize(1, 1), .1, context, Geometry.FloatPoint(.5, .5))
+                self.assertEqual(diffraction.call_count, 1)
+        finally:
+            camera.close()
+
     def test_cached_composition_matches_reference_and_reuses_blurs(self):
         rng = np.random.default_rng(42)
         pattern = rng.uniform(-1, 1, (96, 128)).astype(np.float32)

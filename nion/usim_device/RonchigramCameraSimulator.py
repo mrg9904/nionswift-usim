@@ -750,7 +750,13 @@ class RonchigramCameraSimulator(CameraSimulator.CameraSimulator):
                 aberrations["c34a"] = self.instrument.GetVal2D("C34Control").x
                 aberrations["c34b"] = self.instrument.GetVal2D("C34Control").y
                 data = self.__aberrations_controller.apply(aberrations, data)
-                data, metadata = self._apply_kikuchi(data, readout_area, binning_shape, frame_settings, scan_context, aberrations)
+                stage_z_m = self.instrument.GetVal("stage_z_m")
+                if abs(stage_z_m) > SimulationSettings.RONCHIGRAM_KIKUCHI_MAX_STAGE_Z_M:
+                    metadata = {'model': 'large_stage_z_overview', 'band_count': 0,
+                        'kikuchi_enabled': False, 'stage_z_m': stage_z_m,
+                        'kikuchi_max_stage_z_m': SimulationSettings.RONCHIGRAM_KIKUCHI_MAX_STAGE_Z_M}
+                else:
+                    data, metadata = self._apply_kikuchi(data, readout_area, binning_shape, frame_settings, scan_context, aberrations)
                 if not isinstance(data, numpy.ndarray):
                     # Vacuum/non-crystalline frames bypass the compositor.
                     data = data.get()

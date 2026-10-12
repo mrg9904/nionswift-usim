@@ -63,6 +63,12 @@ class EELSCameraSimulator(CameraSimulator.CameraSimulator):
                   "stage_position_m", "beam_shift_m", "features", "energy_offset_eV", "energy_per_channel_eV",
                   "BeamCurrent", "stage_tilt_rad"]
 
+    def acquire_spectrum_image(self, scan_parameters, *, output_path, energy_channel_count=None, check_cancelled=lambda: None):
+        from nion.usim_device import EELSSpectrumImaging
+        return EELSSpectrumImaging.acquire(self, scan_parameters, output_path=output_path,
+                                          energy_channel_count=energy_channel_count,
+                                          check_cancelled=check_cancelled)
+
     def __init__(self, instrument: InstrumentDevice_.Instrument, sensor_dimensions: Geometry.IntSize, counts_per_electron: int) -> None:
         super().__init__(instrument, "eels", sensor_dimensions, counts_per_electron)
         self.__cached_frame: typing.Optional[DataAndMetadata.DataAndMetadata] = None
