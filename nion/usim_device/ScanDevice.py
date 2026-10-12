@@ -142,6 +142,8 @@ class ScanModule(scan_base.ScanModule):
         stage, initial_fov_nm = generator.sample.initial_view
         instrument.stage_position_m = stage
         instrument.SetVal("stage_z_m", getattr(generator.sample, "initial_stage_z_m", 0.))
+        if getattr(generator.sample, 'initial_defocus_m', None) is not None:
+            instrument.SetVal('C10', generator.sample.initial_defocus_m)
         scan_modes = (
             scan_base.ScanSettingsMode(_("Fast"), "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=initial_fov_nm)),
             scan_base.ScanSettingsMode(_("Slow"), "slow", ScanDevice.ScanFrameParameters(pixel_size=(512, 512), pixel_time_us=1, fov_nm=initial_fov_nm)),
@@ -158,6 +160,8 @@ class ScanModule(scan_base.ScanModule):
         stage, fov_nm = generator.sample.initial_view
         self.__instrument.stage_position_m = stage
         self.__instrument.SetVal("stage_z_m", getattr(generator.sample, "initial_stage_z_m", 0.))
+        if getattr(generator.sample, 'initial_defocus_m', None) is not None:
+            self.__instrument.SetVal('C10', generator.sample.initial_defocus_m)
         for index in range(3):
             parameters = self.settings.get_frame_parameters(index)
             parameters.fov_nm = fov_nm

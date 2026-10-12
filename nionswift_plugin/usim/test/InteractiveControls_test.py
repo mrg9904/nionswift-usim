@@ -110,12 +110,12 @@ class TestInteractiveControls(unittest.TestCase):
             self.manager.set_value_2d('stage_tilt_rad', Geometry.FloatPoint())
             baseline = self.capture()
             self.assertTrue(self.controls.handle_key_pressed(panel, self.key('right')))
-            self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').y, math.radians(.1))
+            self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').y, -math.radians(.1))
             self.assertEqual(self.manager.get_value_2d('stage_tilt_rad').x, 0)
             tilted = self.capture()
             self.assertGreater(np.max(np.abs(tilted.data-baseline.data)), 1)
             self.assertTrue(self.controls.handle_key_pressed(panel, self.key('up')))
-            self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').x, math.radians(.1))
+            self.assertAlmostEqual(self.manager.get_value_2d('stage_tilt_rad').x, -math.radians(.1))
             self.assertTrue(self.controls.handle_key_pressed(panel, self.key('left')))
             self.assertTrue(self.controls.handle_key_pressed(panel, self.key('down')))
             self.assertEqual(self.manager.get_value_2d('stage_tilt_rad'), Geometry.FloatPoint())
@@ -133,7 +133,7 @@ class TestInteractiveControls(unittest.TestCase):
                 self.assertFalse(self.controls.handle_key_pressed(panel, self.key('d', shift=shift, control=True)))
                 self.assertAlmostEqual(self.manager.get_value('C10'), initial_focus)
                 self.manager.set_value_2d('stage_tilt_rad', Geometry.FloatPoint())
-                for direction, axis, sign in (('up', 'x', 1), ('down', 'x', -1), ('left', 'y', -1), ('right', 'y', 1)):
+                for direction, axis, sign in (('up', 'x', -1), ('down', 'x', 1), ('left', 'y', 1), ('right', 'y', -1)):
                     before = self.manager.get_value_2d('stage_tilt_rad')
                     self.assertTrue(self.controls.handle_key_pressed(panel, self.key(direction, shift=shift, control=True)))
                     after = self.manager.get_value_2d('stage_tilt_rad')

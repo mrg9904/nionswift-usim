@@ -102,12 +102,14 @@ class TestThousandCathode(unittest.TestCase):
         with AcquisitionTestContext.AcquisitionTestContext(DeviceConfiguration.AcquisitionContextConfiguration()) as context:
             generator = context.instrument.scan_data_generator
             self.assertIn(9, generator.selectable_sample_indices)
+            context.instrument.SetVal('C10', 800e-9)
             generator.sample_index = 9
             self.assertEqual(generator.sample.title, '1000CathodeParticleOnCarbon')
             stage, fov = generator.sample.initial_view
             self.assertEqual(context.instrument.stage_position_m, stage)
-            self.assertEqual(stage, Geometry.FloatPoint(x=938e-9, y=-6820e-9))
-            self.assertAlmostEqual(context.instrument.GetVal('stage_z_m'), 600e-6)
+            self.assertEqual(stage, Geometry.FloatPoint(x=-1.1525116068661883e-5, y=2.8588810367810746e-5))
+            self.assertEqual(context.instrument.GetVal('stage_z_m'), 0.)
+            self.assertAlmostEqual(context.instrument.GetVal('C10'), 100e-9)
             for index in range(3):
                 self.assertEqual(context.scan_hardware_source.get_frame_parameters(index).fov_nm, fov)
             parameters = ScanDevice.ScanFrameParameters(pixel_size=(64, 64), fov_nm=fov, pixel_time_us=1.)

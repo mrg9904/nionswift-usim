@@ -75,11 +75,16 @@ class ThousandCathodeSample(SingleCathodeSample.SingleCathodeSample):
 
     @property
     def initial_view(self):
-        return Geometry.FloatPoint(x=938e-9, y=-6820e-9), 2000.
+        # Selected broad thin patch in workflow particle #7 (rank #1).
+        return Geometry.FloatPoint(x=-1.1525116068661883e-5, y=2.8588810367810746e-5), 2000.
 
     @property
     def initial_stage_z_m(self):
-        return 600e-6
+        return 0.
+
+    @property
+    def initial_defocus_m(self):
+        return 100e-9
 
     def _update_bounds(self):
         vertices = (self.vertices-self.center_nm) @ SampleGeometry.stage_rotation(self.stage_tilt_rad).T+self.center_nm

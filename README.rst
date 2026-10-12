@@ -368,8 +368,8 @@ Interactive microscope controls work while the **uSim HAADF scan** or
 - ``D`` / ``F`` decrease/increase defocus by 10 nm; the mouse wheel changes it by 1 nm.
   There is no +/-1000 nm limit. Each adjustment continues from the current
   manual setting, including an effective C10Control offset.
-- Arrow keys change stage tilt by 0.1 degrees: Up increases TX, Down decreases
-  TX, Left decreases TY and Right increases TY. The instrument panel's
+- Arrow keys change stage tilt by 0.1 degrees: Up decreases TX, Down increases
+  TX, Left increases TY and Right decreases TY. The instrument panel's
   TX/TY fields show the same values and the Kikuchi orientation updates live.
   STL specimens also rotate geometrically: projected outline, beam thickness
   and depth-dependent HAADF focus change. SingleCathodeOnCarbon rotates about
@@ -436,8 +436,9 @@ never renormalized into the recorded detector window.
 Sample-specific initial views
 -----------------------------
 
-The startup specimen is **1000CathodeParticleOnCarbon**, with Stage X=938 nm,
-Y=-6820 nm, Z=600 um and a 2000 nm scan FoV. Selecting this sample restores
+The startup specimen is **1000CathodeParticleOnCarbon**, centered on the selected
+thin patch in workflow particle #7: Stage X=-11525.11606866 nm, Y=28588.81036781 nm,
+Z=0, defocus=100 nm and a 2000 nm scan FoV. Selecting this sample restores
 that view; other samples reset Stage Z to zero when selected.
 On each specimen change, the ten-particle **STL Depth Sample** uses
 stage x=1222 nm, y=279 nm and FoV 10000 nm. Other samples use FoV 200 nm,
@@ -545,8 +546,10 @@ from the particle stack limit. ``--size-peak-nm``, ``--size-hwhm-nm`` and
 ``--max-stack-height-nm`` configure these parameters.
 
 Select **1000CathodeParticleOnCarbon** to view this assembly in HAADF, EELS,
-and Ronchigram. Its initial view uses Stage X=938 nm, Y=-6820 nm and Z=600 um,
-with a 2000 nm scan FoV, to expose the central grid opening in the Ronchigram.
+and Ronchigram. Its initial view centers the selected thin patch in particle #7 at
+Stage X=-11525.11606866 nm, Y=28588.81036781 nm, Z=0 and defocus=100 nm,
+with a 2000 nm scan FoV. Window-finding scripts explicitly initialize their
+own wider Ronchigram view before grid calibration.
 Each crystal uses the existing NNMTO CIF with its own saved rotation; local
 [001] follows its prism base normal. Stage tilt rotates both geometry and
 crystal orientation. The SingleCathodeOnCarbon sample remains available.
